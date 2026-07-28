@@ -1,0 +1,68 @@
+{
+  "name": "pandadoc-search",
+  "version": "1.0.0",
+  "description": "Global-hotkey search bar that opens PandaDoc document search results",
+  "author": "Deron Witmer <deron@rooted.software>",
+  "license": "MIT",
+  "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dwitmer06-28-89/pandadoc-search.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac",
+    "release": "electron-builder --mac --publish always"
+  },
+  "build": {
+    "appId": "software.rooted.pandadoc-search",
+    "productName": "PandaDoc Search",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "config.js"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dwitmer06-28-89",
+        "repo": "pandadoc-search"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.0.0"
+  },
+  "allowScripts": {
+    "electron@32.3.3": true
+  }
+}

@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>PandaDoc Search</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { background: transparent; overflow: hidden; }
+      /* Generous transparent margin so the feathered shadow has room to fall off
+         instead of being clipped at the window edge. Kept in sync with fit(). */
+      :root {
+        --pad-x: 52px;
+        --pad-top: 40px;
+        --pad-bottom: 88px;
+      }
+      body {
+        font: 400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: var(--pad-top) var(--pad-x) var(--pad-bottom);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ---- the pill ---- */
+      .pill {
+        -webkit-app-region: drag;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 56px;
+        padding: 0 8px 0 12px;
+        border-radius: 999px;
+        background: rgba(41, 41, 43, 0.97);
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        /* Spotlight-style feathering: a hairline contact edge, then five
+           progressively wider, weaker layers so the falloff has no visible
+           boundary. Many low-opacity layers read far softer than one dark blur. */
+        box-shadow:
+          0 0 0 0.5px rgba(0, 0, 0, 0.26),
+          0 0 30px rgba(0, 0, 0, 0.08),
+          0 1px 2px rgba(0, 0, 0, 0.09),
+          0 3px 8px rgba(0, 0, 0, 0.09),
+          0 7px 18px rgba(0, 0, 0, 0.1),
+          0 14px 38px rgba(0, 0, 0, 0.13),
+          0 26px 72px rgba(0, 0, 0, 0.17);
+      }
+      .glyph {
+        -webkit-app-region: no-drag;
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.09);
+      }
+      input {
+        -webkit-app-region: no-drag;
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: #ececed;
+        font: 400 17px -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      input::placeholder { color: rgba(255, 255, 255, 0.42); }
+
+      .tag {
+        flex: none;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.45);
+        letter-spacing: 0.1px;
+      }
+      .send {
+        -webkit-app-region: no-drag;
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border: 0;
+        border-radius: 50%;
+        background: #c96442;
+        cursor: default;
+        transition: background 0.12s, opacity 0.12s;
+      }
+      .send:hover { background: #d4744f; }
+      .send:disabled { opacity: 0.4; }
+
+      /* ---- recent searches, floating under the pill ---- */
+      .chips {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 6px;
+        padding-top: 8px;
+      }
+      .chips:empty { display: none; }
+      .chip {
+        -webkit-app-region: no-drag;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 190px;
+        padding: 7px 13px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        background: rgba(41, 41, 43, 0.94);
+        color: rgba(255, 255, 255, 0.62);
+        font: 400 13px -apple-system, BlinkMacSystemFont, sans-serif;
+        cursor: default;
+        box-shadow:
+          0 0 0 0.5px rgba(0, 0, 0, 0.2),
+          0 2px 6px rgba(0, 0, 0, 0.1),
+          0 8px 22px rgba(0, 0, 0, 0.14);
+        transition: background 0.12s, color 0.12s;
+      }
+      .chip:hover { background: rgba(58, 58, 60, 0.97); color: rgba(255, 255, 255, 0.9); }
+      .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .chip svg { flex: none; opacity: 0.6; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <div class="pill">
+        <div class="glyph">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.2" stroke-linecap="round">
+            <circle cx="8.5" cy="8.5" r="6" />
+            <line x1="13" y1="13" x2="18" y2="18" />
+          </svg>
+        </div>
+
+        <input id="q" placeholder="Search PandaDoc…" autofocus spellcheck="false" />
+
+        <div class="tag">PandaDoc</div>
+        <button class="send" id="go" disabled>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="13" x2="8" y2="3" />
+            <polyline points="3.5,7.5 8,3 12.5,7.5" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <script>
+      const q = document.getElementById('q');
+      const go = document.getElementById('go');
+      const chips = document.getElementById('chips');
+      const wrap = document.getElementById('wrap');
+
+      const CLOCK =
+        '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
+        '<circle cx="8" cy="8" r="6.2"/><polyline points="8,4.4 8,8 10.6,9.6"/></svg>';
+
+      function fit() {
+        const css = getComputedStyle(document.documentElement);
+        const chrome =
+          parseFloat(css.getPropertyValue('--pad-top')) +
+          parseFloat(css.getPropertyValue('--pad-bottom'));
+        window.api.resize(Math.ceil(wrap.getBoundingClientRect().height) + chrome);
+      }
+
+      function renderChips(recents) {
+        chips.innerHTML = '';
+        (recents || []).forEach((term) => {
+          const b = document.createElement('button');
+          b.className = 'chip';
+          b.innerHTML = CLOCK + '<span></span>';
+          b.querySelector('span').textContent = term;
+          b.addEventListener('click', () => window.api.search(term));
+          chips.appendChild(b);
+        });
+        fit();
+      }
+
+      function submit() {
+        if (q.value.trim()) window.api.search(q.value);
+      }
+
+      window.api.onReset((_e, recents) => {
+        q.value = '';
+        go.disabled = true;
+        renderChips(recents);
+        q.focus();
+      });
+
+      q.addEventListener('input', () => (go.disabled = !q.value.trim()));
+      q.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submit();
+        else if (e.key === 'Escape') window.api.cancel();
+      });
+      go.addEventListener('click', submit);
+
+      // The transparent shadow margin is still part of the window, so a click
+      // out there would otherwise land on nothing. Treat it as dismiss.
+      document.addEventListener('mousedown', (e) => {
+        if (!e.target.closest('.pill, .chip')) window.api.cancel();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.api.cancel();
+      });
+
+      fit();
+      q.focus();
+    </script>
+  </body>
+</html>

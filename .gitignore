@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+.DS_Store
+*.log
+
+# never commit signing or notarization credentials
+.env
+.env.*
+*.p12
+*.mobileprovision
