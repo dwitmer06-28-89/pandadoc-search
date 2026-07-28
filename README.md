@@ -42,8 +42,9 @@ from an embedded browser — either use email/password, or set `openMode` to
 ## Configure
 
 Menu-bar icon → **Edit Config…** opens your `config.json`, at
-`~/Library/Application Support/pandadoc-search/config.json`. It's created on first
-launch from the defaults in [config.js](config.js). Restart the app after editing.
+`~/Library/Application Support/PandaDoc Search/config.json` (in a dev run it's
+`.../pandadoc-search/`). It's created on first launch from the defaults in
+[config.js](config.js). Restart the app after editing.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -92,7 +93,7 @@ credentials in your environment for notarization:
 export APPLE_ID="you@example.com"
 export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"   # appleid.apple.com
 export APPLE_TEAM_ID="N7C6V6L995"
-export GH_TOKEN="<a GitHub token with repo scope>"
+export GH_TOKEN="$(gh auth token)"
 ```
 
 Then bump the version and publish:
