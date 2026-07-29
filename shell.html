@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>PandaDoc window shell</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      /* This view is the full height of the window, not just the strip. It sits
+         under PandaDoc and paints the window's own colour, so wherever the page
+         view's rounded corners cut away, this shows through instead of the
+         desktop. Only the top strip is visible in practice. */
+      html, body {
+        height: 100%;
+        background: var(--chrome, #181a1b);
+        cursor: default;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #bar {
+        display: flex;
+        align-items: center;
+        height: 38px;
+        padding-left: 16px;
+      }
+
+      /* Traffic lights. The real ones don't render on a transparent window —
+         which is what a window radius larger than Chromium's own requires — so
+         these are ours. Same 12px/8px geometry and colours as the system's. */
+      #lights {
+        display: flex;
+        gap: 8px;
+      }
+      .light {
+        position: relative;
+        width: 12px;
+        height: 12px;
+        border: 0;
+        border-radius: 50%;
+        padding: 0;
+        cursor: default;
+        background: #4a4d50;
+        transition: background 0.1s;
+      }
+      /* Colour only while the window has focus, like the system buttons. */
+      body.active .close { background: #ff5f57; }
+      body.active .min { background: #febc2e; }
+      body.active .zoom { background: #28c840; }
+
+      /* Glyphs appear on hover over the cluster, again matching the system. */
+      .light::before,
+      .light::after {
+        content: '';
+        position: absolute;
+        background: rgba(0, 0, 0, 0.55);
+        opacity: 0;
+        transition: opacity 0.1s;
+      }
+      #lights:hover .light::before,
+      #lights:hover .light::after { opacity: 1; }
+
+      /* × */
+      .close::before, .close::after {
+        left: 2.5px; top: 5.4px; width: 7px; height: 1.2px; border-radius: 1px;
+      }
+      .close::before { transform: rotate(45deg); }
+      .close::after { transform: rotate(-45deg); }
+      /* − */
+      .min::before {
+        left: 2.5px; top: 5.4px; width: 7px; height: 1.2px; border-radius: 1px;
+      }
+      /* + */
+      .zoom::before {
+        left: 2.5px; top: 5.4px; width: 7px; height: 1.2px; border-radius: 1px;
+      }
+      .zoom::after {
+        left: 5.4px; top: 2.5px; width: 1.2px; height: 7px; border-radius: 1px;
+      }
+
+      /* Everything in the strip that isn't a button drags the window. */
+      #grab { flex: 1; align-self: stretch; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <div id="lights">
+        <button class="light close" id="close" title="Close"></button>
+        <button class="light min" id="min" title="Minimise"></button>
+        <button class="light zoom" id="zoom" title="Zoom"></button>
+      </div>
+      <div id="grab"></div>
+    </div>
+
+    <script>
+      const grab = document.getElementById('grab');
+      const lights = document.getElementById('lights');
+
+      document.getElementById('close').addEventListener('click', () => window.shell.close());
+      document.getElementById('min').addEventListener('click', () => window.shell.minimize());
+      document.getElementById('zoom').addEventListener('click', () => window.shell.zoom());
+
+      window.shell.onFocus((active) => document.body.classList.toggle('active', active));
+      window.shell.onChrome((color) => {
+        document.documentElement.style.setProperty('--chrome', color);
+      });
+
+      // Dragging is done by hand rather than with -webkit-app-region: drag.
+      // The main process moves the window by the delta between where the pointer
+      // is now and where it was grabbed; because the window moves with it, the
+      // next event reports the grab offset again, so the scheme self-corrects
+      // instead of accumulating drift.
+      let dragging = false;
+
+      grab.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        dragging = true;
+        window.shell.dragStart(e.clientX, e.clientY);
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (dragging) window.shell.dragMove(e.clientX, e.clientY);
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        window.shell.dragEnd();
+      });
+
+      // Double-clicking a titlebar zooms the window on macOS.
+      grab.addEventListener('dblclick', () => window.shell.zoom());
+
+      // Never let a drag start from the buttons.
+      lights.addEventListener('mousedown', (e) => e.stopPropagation());
+    </script>
+  </body>
+</html>

@@ -26,7 +26,19 @@ module.exports = {
 
   // in-app only. PandaDoc ships no dark theme, so force one by running the Dark
   // Reader engine inside the results window. Set false for the stock light UI.
+  // The moon/sun button in the results window flips this and saves it back, so
+  // whatever you last toggled wins over what you set here.
   darkMode: true,
+
+  // Which frames get darkened:
+  //   'all' -> the page and every iframe in it, including the document viewer
+  //   'top' -> the outer page only, leaving embedded viewers as they came
+  // PandaDoc renders an opened document in an iframe, so 'top' leaves that light.
+  darkModeFrames: 'all',
+
+  // Appends every frame dark mode touches to dark-mode.log next to this file.
+  // Only worth turning on when something renders or loads wrong.
+  darkModeDebug: false,
 
   // Dark Reader knobs, only used when darkMode is true. brightness/contrast are
   // percentages (100 = unchanged); sepia/grayscale are 0-100.

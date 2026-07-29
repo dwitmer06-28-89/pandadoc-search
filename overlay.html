@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>PandaDoc Search overlay</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; background: transparent; overflow: hidden; }
+      /* The view this page lives in sits over the bottom-right of PandaDoc, so
+         the padding is what keeps the buttons off the window edge — and gives
+         their shadows somewhere to fall off instead of being clipped. */
+      body {
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 10px 16px 16px 10px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border: 0;
+        border-radius: 50%;
+        cursor: default;
+        /* Same feathered stack as the search pill, scaled down. */
+        box-shadow:
+          0 0 0 0.5px rgba(0, 0, 0, 0.22),
+          0 1px 2px rgba(0, 0, 0, 0.1),
+          0 4px 10px rgba(0, 0, 0, 0.14),
+          0 10px 26px rgba(0, 0, 0, 0.18);
+        transition: background 0.12s, transform 0.08s;
+      }
+      button:active { transform: scale(0.94); }
+
+      /* Slate glass, so it reads over either a dark or a light PandaDoc. */
+      .theme {
+        background: rgba(31, 41, 55, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .theme:hover { background: rgba(55, 65, 81, 0.95); }
+
+      /* The app icon's palette: emerald, matching the send button in the pill. */
+      .search { background: #34d399; }
+      .search:hover { background: #4ee0aa; }
+    </style>
+  </head>
+  <body>
+    <button class="theme" id="theme" title="Toggle dark mode"></button>
+
+    <button class="search" id="search" title="Search PandaDoc">
+      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round">
+        <circle cx="8.5" cy="8.5" r="6" />
+        <line x1="13" y1="13" x2="18" y2="18" />
+      </svg>
+    </button>
+
+    <script>
+      const theme = document.getElementById('theme');
+
+      // Whichever mode is currently on, so the button reports state rather than
+      // asking you to guess what tapping it does.
+      const MOON =
+        '<svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#f3f4f6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M16.5 12.4A7 7 0 0 1 7.6 3.5a7 7 0 1 0 8.9 8.9Z"/></svg>';
+
+      const SUN =
+        '<svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#f3f4f6" stroke-width="1.7" stroke-linecap="round">' +
+        '<circle cx="10" cy="10" r="3.6"/>' +
+        '<line x1="10" y1="1.6" x2="10" y2="3.4"/><line x1="10" y1="16.6" x2="10" y2="18.4"/>' +
+        '<line x1="1.6" y1="10" x2="3.4" y2="10"/><line x1="16.6" y1="10" x2="18.4" y2="10"/>' +
+        '<line x1="4.1" y1="4.1" x2="5.4" y2="5.4"/><line x1="14.6" y1="14.6" x2="15.9" y2="15.9"/>' +
+        '<line x1="4.1" y1="15.9" x2="5.4" y2="14.6"/><line x1="14.6" y1="5.4" x2="15.9" y2="4.1"/></svg>';
+
+      window.overlay.onDarkState((_e, dark) => {
+        theme.innerHTML = dark ? MOON : SUN;
+        theme.title = dark ? 'Dark mode on' : 'Dark mode off';
+      });
+
+      theme.addEventListener('click', () => window.overlay.toggleDark());
+      document.getElementById('search').addEventListener('click', () => window.overlay.search());
+
+      window.overlay.ready();
+    </script>
+  </body>
+</html>

@@ -41,6 +41,8 @@ let win = null;
 let tray = null;
 let results = null; // the single reusable PandaDoc container window
 let resultsView = null; // the WebContentsView inside it holding PandaDoc
+let resultsStrip = null; // the drag strip above it
+let resultsOverlay = null; // the floating dark-mode/search controls over it
 let currentUrl = null; // what that view was last told to load
 let recents = [];
 
@@ -66,6 +68,15 @@ function loadConfig() {
   } catch {
     // Malformed config.json — fall back to the shipped defaults rather than
     // refusing to start.
+  }
+}
+
+function saveConfig() {
+  try {
+    fs.writeFileSync(configFile(), JSON.stringify(config, null, 2) + '\n');
+  } catch {
+    // Read-only userData is unusual but not worth interrupting a toggle over —
+    // the setting still applies for this run.
   }
 }
 
@@ -132,6 +143,26 @@ function hide() {
   if (win && win.isVisible()) win.hide();
 }
 
+// What the hotkey does. Once there's a PandaDoc window open, the first press
+// brings that forward rather than the pill — the results you already have are
+// almost always what you wanted, and the window may be buried behind whatever
+// you were doing. Press it again, now that the window has focus, and you get the
+// pill on top of it to run a new search. Its own search button is the same thing
+// without the first press.
+function summon() {
+  const live = results && !results.isDestroyed();
+  const pillUp = win && win.isVisible();
+
+  if (live && !pillUp && !results.isFocused()) {
+    if (results.isMinimized()) results.restore();
+    results.show();
+    results.focus();
+    return;
+  }
+
+  show();
+}
+
 function buildUrl(term) {
   return `${config.baseUrl}?search=${encodeURIComponent(term)}${config.extraParams}`;
 }
@@ -165,6 +196,13 @@ function closePreviousWindows(done) {
 // PandaDoc has no dark theme, so we run the Dark Reader engine (the same one
 // behind the browser extension) inside the results window and let it invert the
 // page dynamically.
+//
+// The engine only goes in the top-level page. PandaDoc opens a document in an
+// `app.pandadoc.com/e/` iframe, and Dark Reader inside that frame stops it ever
+// finishing its "Connecting…" phase — the engine rewrites styles from a
+// MutationObserver, and the editor evidently can't come up underneath that. That
+// frame gets a plain inverting stylesheet instead: one <style> element, no
+// observers, no patched DOM APIs, so there is nothing there to stall it.
 
 const DARK_BG = '#181a1b'; // Dark Reader's own page background
 let darkReaderSource = null;
@@ -182,28 +220,167 @@ function loadDarkReader() {
 // Injected into the target's main world — Dark Reader expects to be a page
 // script, so a preload's isolated world is the wrong place for it. `target` is a
 // WebContents or a WebFrameMain; both take executeJavaScript.
-async function injectDarkReader(target) {
+//
+// Load and enable have to happen in ONE evaluation. Two frames-worth of triggers
+// fire per document (the subtree sweep and did-frame-finish-load), and if the
+// "is it already there?" test is a separate round-trip they both come back false
+// and each loads a copy. Two Dark Reader instances in one frame then chase each
+// other's injected styles through their MutationObservers and peg that frame's
+// main thread — the page never finishes loading. The flag below is set before
+// anything can yield, so the second caller is a no-op.
+function darkReaderPayload() {
   const src = loadDarkReader();
-  if (!src) return false;
+  if (!src) return null;
+
+  return (
+    '(function () {\n' +
+    '  if (window.__pandadocSearchDark) return false;\n' +
+    '  window.__pandadocSearchDark = true;\n' +
+    '  try {\n' +
+    // Only evaluated if it isn't there already: toggling dark mode off and on
+    // re-enables the engine that's still loaded rather than shipping another
+    // 346KB of source into the frame.
+    '    if (!window.DarkReader) {\n' +
+    src +
+    '\n    }\n' +
+    '  } catch (e) {\n' +
+    '    window.__pandadocSearchDark = false;\n' +
+    '    throw e;\n' +
+    '  }\n' +
+    `  DarkReader.enable(${JSON.stringify(config.darkModeOptions || {})});\n` +
+    '  return true;\n' +
+    '})()'
+  );
+}
+
+// The engine-free alternative for frames that can't take Dark Reader. Inverting
+// the whole document and then inverting media back is how the simplest dark-mode
+// extensions work: cruder colours than Dark Reader, but it is one stylesheet and
+// touches none of the frame's own JavaScript. Nested iframes are inverted back
+// too, so they render normally and aren't darkened twice.
+const INVERT_CSS = [
+  ':root{background:#ffffff !important;',
+  'filter:invert(1) hue-rotate(180deg) !important}',
+  'img,picture,video,canvas,svg,iframe,embed,object,',
+  '[style*="url("]{filter:invert(1) hue-rotate(180deg) !important}',
+].join('');
+
+function invertPayload() {
+  return (
+    '(function () {\n' +
+    '  if (window.__pandadocSearchDark) return false;\n' +
+    '  window.__pandadocSearchDark = true;\n' +
+    '  var s = document.createElement("style");\n' +
+    '  s.id = "pandadoc-search-dark";\n' +
+    `  s.textContent = ${JSON.stringify(INVERT_CSS)};\n` +
+    '  (document.head || document.documentElement).appendChild(s);\n' +
+    '  return true;\n' +
+    '})()'
+  );
+}
+
+// Undoes either treatment, whichever the frame got. Dark Reader's own disable()
+// removes every style it added, and the plain stylesheet is one element.
+const UNDARK_JS = [
+  '(function () {',
+  '  if (!window.__pandadocSearchDark) return false;',
+  '  window.__pandadocSearchDark = false;',
+  '  try { if (window.DarkReader) DarkReader.disable(); } catch (e) {}',
+  '  var s = document.getElementById("pandadoc-search-dark");',
+  '  if (s) s.remove();',
+  '  return true;',
+  '})()',
+].join('\n');
+
+async function injectDark(target, method) {
+  const payload = method === 'engine' ? darkReaderPayload() : invertPayload();
+  if (!payload) return false;
 
   try {
-    // The UMD bundle hangs itself off globalThis; re-running it after an
-    // in-page navigation would be wasted work.
-    const already = await target.executeJavaScript('typeof DarkReader !== "undefined"');
-    if (!already) await target.executeJavaScript(src);
-    await target.executeJavaScript(
-      `DarkReader.enable(${JSON.stringify(config.darkModeOptions || {})})`
-    );
-    return true;
+    return await target.executeJavaScript(payload);
   } catch {
     // Navigated away mid-injection, or the frame blocked eval — not fatal.
     return false;
   }
 }
 
-// Dark Reader only styles the document it was loaded into, so every frame needs
-// its own copy: PandaDoc renders a document/contract in an iframe, which is why
-// opening one from the results list came up light.
+function darkLog(line) {
+  if (!config.darkModeDebug) return;
+  try {
+    fs.appendFileSync(
+      path.join(app.getPath('userData'), 'dark-mode.log'),
+      `${new Date().toISOString()}  ${line}\n`
+    );
+  } catch {
+    /* diagnostics are never worth failing over */
+  }
+}
+
+// How deep a frame sits — 0 is the page itself, 1 an iframe in it, and so on.
+function frameDepth(frame) {
+  let depth = 0;
+  try {
+    for (let f = frame.parent; f; f = f.parent) depth += 1;
+  } catch {
+    /* frame went away mid-walk */
+  }
+  return depth;
+}
+
+function describeFrame(frame) {
+  let url = '(gone)';
+  try {
+    url = frame.url || '(empty)';
+  } catch {
+    /* keep the placeholder */
+  }
+  return `depth=${frameDepth(frame)} url=${url.slice(0, 160)}`;
+}
+
+// "app.pandadoc.com" -> "pandadoc.com". Single-label hosts and IPs are their own
+// site, so they're returned unchanged.
+function siteOf(url) {
+  try {
+    const { hostname } = new URL(url);
+    if (/^[\d.]+$/.test(hostname) || hostname.indexOf('.') === -1) return hostname;
+    return hostname.split('.').slice(-2).join('.');
+  } catch {
+    return null;
+  }
+}
+
+// Which treatment a frame gets, if any:
+//   'engine' -> the Dark Reader engine, top-level page only
+//   'invert' -> the plain inverting stylesheet, for PandaDoc's own iframes
+// Everything else is left alone. That deliberately includes third-party frames —
+// the doubleclick trackers PandaDoc embeds were getting a 346KB style engine
+// injected into them for no visible benefit — and anything nested deeper than one
+// level, which is inverted by its parent already.
+function frameTreatment(frame, topUrl) {
+  const depth = frameDepth(frame);
+  let url;
+  try {
+    url = frame.url;
+  } catch {
+    return null; // frame went away
+  }
+
+  if (!/^https?:$/.test(new URL(url).protocol)) return null; // about:blank, blob:
+  if (depth === 0) return 'engine';
+  if (config.darkModeFrames !== 'all') return null;
+  if (depth > 1) return null;
+  if (siteOf(url) !== siteOf(topUrl)) return null;
+  return 'invert';
+}
+
+function treatmentFor(frame, wc) {
+  try {
+    return frameTreatment(frame, wc.mainFrame.url);
+  } catch {
+    return null;
+  }
+}
+
 async function applyDarkMode(wc) {
   if (!config.darkMode) return null;
 
@@ -214,7 +391,20 @@ async function applyDarkMode(wc) {
     return null; // window went away
   }
 
-  await Promise.all(frames.map((frame) => injectDarkReader(frame)));
+  darkLog(`sweep: ${frames.length} frame(s) in subtree`);
+
+  await Promise.all(
+    frames.map(async (frame) => {
+      const where = describeFrame(frame);
+      const method = treatmentFor(frame, wc);
+      if (!method) {
+        darkLog(`  leave   ${where}`);
+        return;
+      }
+      const done = await injectDark(frame, method);
+      darkLog(`  ${done ? method.padEnd(7) : 'noop   '} ${where}`);
+    })
+  );
 
   // The window background is matched to the top-level document's.
   try {
@@ -226,16 +416,59 @@ async function applyDarkMode(wc) {
   }
 }
 
+// Everything currently showing PandaDoc content, so toggling the setting can
+// reach the popups PandaDoc opened as well as the main view.
+const darkTargets = new Set();
+
 // Frames come and go long after the top-level document is ready — an iframe
 // created when you click into a document never sees `dom-ready`.
 function watchFramesForDarkMode(wc) {
-  if (!config.darkMode) return;
+  // Registered unconditionally, and the config is read per-event: dark mode is
+  // a toggle now, so a window created while it was off still has to darken when
+  // it's switched back on.
+  darkTargets.add(wc);
+  wc.on('destroyed', () => darkTargets.delete(wc));
 
   wc.on('did-frame-finish-load', (_e, isMainFrame, processId, routingId) => {
+    if (!config.darkMode) return;
     if (isMainFrame) return; // the dom-ready hook covers that one
     const frame = webFrameMain.fromId(processId, routingId);
-    if (frame) injectDarkReader(frame);
+    if (!frame) return;
+
+    const where = describeFrame(frame);
+    const method = treatmentFor(frame, wc);
+    if (!method) {
+      darkLog(`late  leave   ${where}`);
+      return;
+    }
+    injectDark(frame, method).then((done) =>
+      darkLog(`late  ${done ? method.padEnd(7) : 'noop   '} ${where}`)
+    );
   });
+}
+
+async function removeDarkMode(wc) {
+  let frames;
+  try {
+    frames = wc.mainFrame.framesInSubtree;
+  } catch {
+    return; // window went away
+  }
+
+  darkLog(`undark: ${frames.length} frame(s) in subtree`);
+
+  await Promise.all(
+    frames.map(async (frame) => {
+      const where = describeFrame(frame);
+      let done = false;
+      try {
+        done = await frame.executeJavaScript(UNDARK_JS);
+      } catch {
+        /* navigated away, or the frame blocked eval */
+      }
+      darkLog(`  ${done ? 'undark ' : 'noop   '} ${where}`);
+    })
+  );
 }
 
 // ---- the PandaDoc container window -----------------------------------------
@@ -252,15 +485,66 @@ function watchFramesForDarkMode(wc) {
 
 const TOP_STRIP = 38;
 
-const STRIP_HTML =
-  'data:text/html;charset=utf-8,' +
-  encodeURIComponent(
-    '<style>html,body{margin:0;height:100%;background:transparent;' +
-      'cursor:default;-webkit-app-region:drag}</style>'
-  );
+// Chromium rounds its windows to about 9pt (14pt from Electron 41), while this
+// version of macOS rounds its own to about 26pt — so a native-framed window is
+// visibly squarer than Safari or Finder sitting next to it. Matching means
+// drawing the shape ourselves: a transparent window with `roundedCorners` off,
+// and the radius set on the views inside it.
+//
+// The catch is that macOS won't draw the traffic lights on a transparent window
+// (no combination of titleBarStyle/transparent/setWindowButtonVisibility gets
+// them back), so shell.html draws its own — see there for the rest.
+const CORNER_RADIUS = 28;
 
 function pageBackground() {
   return config.darkMode ? DARK_BG : '#ffffff';
+}
+
+// ---- the floating controls -------------------------------------------------
+// A dark-mode toggle and a search button, in their own transparent view pinned
+// over the bottom-right of PandaDoc. Small on purpose: the view swallows clicks
+// wherever it sits, so it covers only the corner it needs.
+
+const OVERLAY_W = 120;
+const OVERLAY_H = 64;
+
+function sendDarkState() {
+  if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
+  resultsOverlay.webContents.send('overlay:dark-state', !!config.darkMode);
+}
+
+function paintChrome(color) {
+  // Not the window itself — it stays transparent so the rounded views define the
+  // shape. Painting it would put square corners back behind them.
+  if (resultsView) resultsView.setBackgroundColor(color);
+  if (resultsStrip) {
+    resultsStrip.setBackgroundColor(color);
+    if (!resultsStrip.webContents.isDestroyed()) {
+      resultsStrip.webContents.send('shell:chrome', color);
+    }
+  }
+}
+
+async function toggleDarkMode() {
+  config.darkMode = !config.darkMode;
+  saveConfig();
+  sendDarkState();
+
+  // Darkens native scrollbars and form controls, and makes prefers-color-scheme
+  // report dark — set at startup too, so it has to follow the toggle.
+  nativeTheme.themeSource = config.darkMode ? 'dark' : 'light';
+
+  paintChrome(pageBackground());
+
+  for (const wc of darkTargets) {
+    if (wc.isDestroyed()) continue;
+    if (config.darkMode) {
+      const bg = await applyDarkMode(wc);
+      if (bg && resultsView && wc === resultsView.webContents) paintChrome(bg);
+    } else {
+      await removeDarkMode(wc);
+    }
+  }
 }
 
 function createResultsWindow() {
@@ -268,11 +552,11 @@ function createResultsWindow() {
     width: 1440,
     height: 900,
     title: 'PandaDoc',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: (TOP_STRIP - 12) / 2 },
-    // Matching the page keeps the strip from reading as a titlebar, and keeps
-    // the pre-paint flash from being a white rectangle.
-    backgroundColor: pageBackground(),
+    titleBarStyle: 'hidden',
+    // We draw the window's shape, so the system must not draw its own.
+    transparent: true,
+    roundedCorners: false,
+    backgroundColor: '#00000000',
     // Without this, the first click into an unfocused window is swallowed to
     // activate it and everything needs clicking twice.
     acceptFirstMouse: true,
@@ -285,26 +569,127 @@ function createResultsWindow() {
     },
   });
   view.setBackgroundColor(pageBackground());
+  view.setBorderRadius(CORNER_RADIUS);
 
-  const strip = new WebContentsView();
+  // Full window height, not just the strip: it paints the window's colour behind
+  // PandaDoc, so where the page view's rounded corners cut away, this shows
+  // through rather than the desktop. Only its top strip is ever visible.
+  const strip = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'shell-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
   strip.setBackgroundColor(pageBackground());
-  strip.webContents.loadURL(STRIP_HTML);
+  strip.setBorderRadius(CORNER_RADIUS);
+  strip.webContents.loadFile(path.join(__dirname, 'shell.html'));
 
+  const overlay = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'overlay-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  // Fully transparent, so PandaDoc shows through everywhere the buttons aren't.
+  overlay.setBackgroundColor('#00000000');
+  overlay.webContents.loadFile(path.join(__dirname, 'overlay.html'));
+
+  // Added last, so it draws above PandaDoc.
   win.contentView.addChildView(strip);
   win.contentView.addChildView(view);
+  win.contentView.addChildView(overlay);
 
   const layout = () => {
     const { width, height } = win.getContentBounds();
-    strip.setBounds({ x: 0, y: 0, width, height: TOP_STRIP });
+    strip.setBounds({ x: 0, y: 0, width, height });
     view.setBounds({
       x: 0,
       y: TOP_STRIP,
       width,
       height: Math.max(0, height - TOP_STRIP),
     });
+    overlay.setBounds({
+      x: Math.max(0, width - OVERLAY_W),
+      y: Math.max(0, height - OVERLAY_H),
+      width: Math.min(width, OVERLAY_W),
+      height: Math.min(height, OVERLAY_H),
+    });
   };
   layout();
   win.on('resize', layout);
+
+  // Our traffic lights are only coloured while the window is in front, like the
+  // system's, so the strip has to be told.
+  const tellFocus = (active) => {
+    if (!strip.webContents.isDestroyed()) {
+      strip.webContents.send('shell:focus', active);
+    }
+  };
+  win.on('focus', () => tellFocus(true));
+  win.on('blur', () => tellFocus(false));
+  strip.webContents.on('did-finish-load', () => {
+    tellFocus(win.isFocused());
+    strip.webContents.send('shell:chrome', pageBackground());
+  });
+
+  // ---- back / forward ----
+  // This window has no browser chrome and no menu bar, so nothing implements the
+  // navigation keys a browser gives you for free. Handled in the main process
+  // rather than injected into the page, so they work from inside PandaDoc's
+  // document iframe too — which is exactly where you want to go back from.
+  const navigate = (delta) => {
+    const history = view.webContents.navigationHistory;
+    if (delta < 0 && history.canGoBack()) history.goBack();
+    else if (delta > 0 && history.canGoForward()) history.goForward();
+  };
+
+  // Cmd+arrow is also "move to start/end of line" whenever a text field has the
+  // caret, and a browser decides which meaning applies by looking at what's
+  // focused. We can't answer that synchronously, so the key is let through and
+  // the navigation happens a beat later only if nothing was being edited. Asking
+  // the focused frame rather than the top document is what makes this right
+  // inside PandaDoc's editor iframe.
+  const EDITING_CHECK =
+    '(() => { const el = document.activeElement;' +
+    ' return !!el && (el.isContentEditable ||' +
+    ' /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)); })()';
+
+  const navigateUnlessEditing = (delta) => {
+    let frame;
+    try {
+      frame = view.webContents.focusedFrame || view.webContents.mainFrame;
+    } catch {
+      return;
+    }
+    frame
+      .executeJavaScript(EDITING_CHECK)
+      .then((editing) => {
+        if (!editing) navigate(delta);
+      })
+      .catch(() => navigate(delta));
+  };
+
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.meta || input.control || input.alt) return;
+
+    // Cmd+[ and Cmd+] mean nothing else, so they act immediately.
+    if (input.key === '[' || input.key === ']') {
+      event.preventDefault();
+      navigate(input.key === '[' ? -1 : 1);
+      return;
+    }
+
+    if (input.key === 'ArrowLeft') navigateUnlessEditing(-1);
+    else if (input.key === 'ArrowRight') navigateUnlessEditing(1);
+  });
+
+  // The other way macOS goes back: two-finger swipe, if the trackpad is set to it.
+  win.on('swipe', (_e, direction) => {
+    if (direction === 'right') navigate(-1);
+    else if (direction === 'left') navigate(1);
+  });
 
   watchFramesForDarkMode(view.webContents);
 
@@ -324,13 +709,15 @@ function createResultsWindow() {
     // it from the page rather than guessing — otherwise the drag strip is a
     // slightly different dark and reads as a titlebar.
     if (bg && !win.isDestroyed()) {
-      win.setBackgroundColor(bg);
       view.setBackgroundColor(bg);
       strip.setBackgroundColor(bg);
+      if (!strip.webContents.isDestroyed()) {
+        strip.webContents.send('shell:chrome', bg);
+      }
     }
   });
 
-  return { win, view };
+  return { win, view, strip, overlay };
 }
 
 // One window, reused forever. A second search replaces its URL rather than
@@ -364,7 +751,12 @@ function openInApp(term, url) {
     return;
   }
 
-  ({ win: results, view: resultsView } = createResultsWindow());
+  ({
+    win: results,
+    view: resultsView,
+    strip: resultsStrip,
+    overlay: resultsOverlay,
+  } = createResultsWindow());
 
   currentUrl = url;
   resultsView.webContents.loadURL(url);
@@ -376,6 +768,8 @@ function openInApp(term, url) {
   results.on('closed', () => {
     results = null;
     resultsView = null;
+    resultsStrip = null;
+    resultsOverlay = null;
     currentUrl = null;
     if (app.dock) app.dock.hide();
   });
@@ -417,6 +811,53 @@ ipcMain.on('search', (_e, term) => {
 });
 
 ipcMain.on('cancel', () => hide());
+
+// ---- the floating controls' channels ----------------------------------------
+ipcMain.on('overlay:ready', () => sendDarkState());
+ipcMain.on('overlay:toggle-dark', () => toggleDarkMode());
+// The search button just raises the same pill the hotkey does; the pill is
+// always-on-top, so it lands over the PandaDoc window.
+ipcMain.on('overlay:search', () => show());
+
+// ---- the results window's own chrome ----------------------------------------
+// Its traffic lights are drawn in shell.html, because macOS won't render the
+// real ones on the transparent window the corner radius needs.
+
+ipcMain.on('shell:close', () => {
+  if (results && !results.isDestroyed()) results.close();
+});
+
+ipcMain.on('shell:minimize', () => {
+  if (results && !results.isDestroyed()) results.minimize();
+});
+
+ipcMain.on('shell:zoom', () => {
+  if (!results || results.isDestroyed()) return;
+  if (results.isMaximized()) results.unmaximize();
+  else results.maximize();
+});
+
+// Where in the strip the window was grabbed. The move is always measured back to
+// this point: the window follows the pointer, so the next event reports the same
+// offset again and the drag can't accumulate drift.
+let dragGrab = null;
+
+ipcMain.on('shell:drag-start', (_e, x, y) => {
+  dragGrab = { x, y };
+});
+
+ipcMain.on('shell:drag-move', (_e, x, y) => {
+  if (!dragGrab || !results || results.isDestroyed()) return;
+  const dx = Math.round(x - dragGrab.x);
+  const dy = Math.round(y - dragGrab.y);
+  if (!dx && !dy) return;
+  const bounds = results.getBounds();
+  results.setBounds({ ...bounds, x: bounds.x + dx, y: bounds.y + dy });
+});
+
+ipcMain.on('shell:drag-end', () => {
+  dragGrab = null;
+});
 
 // The card sizes itself to its content (the chip row appears once there are
 // recent searches), so the window follows it.
@@ -543,7 +984,7 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     setupUpdater();
 
-    if (!globalShortcut.register(config.hotkey, show)) {
+    if (!globalShortcut.register(config.hotkey, summon)) {
       dialog.showErrorBox(
         'Hotkey unavailable',
         `Could not register "${config.hotkey}" — something else owns it.\n\n` +

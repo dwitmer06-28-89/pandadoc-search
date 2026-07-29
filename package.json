@@ -21,6 +21,10 @@
       "main.js",
       "preload.js",
       "index.html",
+      "overlay-preload.js",
+      "overlay.html",
+      "shell-preload.js",
+      "shell.html",
       "config.js",
       "assets/**/*",
       "node_modules/darkreader/darkreader.js",
@@ -86,10 +90,10 @@
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "electron": "^33.4.11",
-    "electron-builder": "^25.0.0"
+    "electron": "^41.10.3",
+    "electron-builder": "^26.15.3"
   },
   "allowScripts": {
-    "electron@32.3.3": true
+    "electron@41.10.3": true
   }
 }
