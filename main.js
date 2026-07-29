@@ -21,6 +21,18 @@ const config = { ...require('./config') };
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+const IS_MAC = process.platform === 'darwin';
+
+const DEFAULT_CHROME = {
+  darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  win32: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  linux: '/usr/bin/google-chrome',
+};
+
+function chromePath() {
+  return config.chromePath || DEFAULT_CHROME[process.platform] || '';
+}
+
 let win = null;
 let tray = null;
 let results = null; // the single reusable PandaDoc container window
@@ -122,7 +134,13 @@ function buildUrl(term) {
 // Close the search window left over from a previous run so results don't pile
 // up. Only windows still sitting on a search-results URL are closed — if you
 // clicked through to an actual document, that window is left alone.
+// macOS only: driving Chrome's windows this way needs AppleScript.
 function closePreviousWindows(done) {
+  if (!IS_MAC) {
+    done();
+    return;
+  }
+
   const prefix = `${config.baseUrl}?search=`;
   const script = `
     if application "Google Chrome" is running then
@@ -199,10 +217,10 @@ function launch(term, url) {
     return;
   }
 
-  if (config.openMode === 'chrome-app' && fs.existsSync(config.chromePath)) {
-    // Calling the binary directly (rather than `open -na`) is what makes
+  if (config.openMode === 'chrome-app' && fs.existsSync(chromePath())) {
+    // Calling the binary directly (rather than macOS `open -na`) is what makes
     // --app work when Chrome is already running.
-    const child = spawn(config.chromePath, [`--app=${url}`], {
+    const child = spawn(chromePath(), [`--app=${url}`], {
       detached: true,
       stdio: 'ignore',
     });
@@ -312,17 +330,11 @@ function checkForUpdatesNow() {
 }
 
 function createTray() {
-  // 16x16 template icon drawn inline so there's no asset to ship.
-  const icon = nativeImage.createFromDataURL(
-    'data:image/svg+xml;base64,' +
-      Buffer.from(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-           <circle cx="7" cy="7" r="5" fill="none" stroke="black" stroke-width="1.8"/>
-           <line x1="11" y1="11" x2="15" y2="15" stroke="black" stroke-width="1.8"/>
-         </svg>`
-      ).toString('base64')
-  );
-  icon.setTemplateImage(true);
+  // nativeImage can't decode SVG, so these are real PNGs. macOS wants a black
+  // template image it tints itself; the Windows tray is dark, so it gets white.
+  const file = IS_MAC ? 'tray.png' : 'tray-win.png';
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', file));
+  if (IS_MAC) icon.setTemplateImage(true);
 
   tray = new Tray(icon);
   tray.setToolTip('PandaDoc Search');

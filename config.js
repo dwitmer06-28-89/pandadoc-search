@@ -29,5 +29,6 @@ module.exports = {
   // into an actual document) are left alone.
   closePreviousWindow: true,
 
-  chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  // chrome-app mode only. Empty = use the default Chrome location for your OS.
+  chromePath: '',
 };

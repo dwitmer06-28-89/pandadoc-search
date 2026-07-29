@@ -21,13 +21,15 @@
       "main.js",
       "preload.js",
       "index.html",
-      "config.js"
+      "config.js",
+      "assets/**/*"
     ],
     "publish": [
       {
         "provider": "github",
         "owner": "dwitmer06-28-89",
-        "repo": "pandadoc-search"
+        "repo": "pandadoc-search",
+        "releaseType": "release"
       }
     ],
     "mac": {
@@ -53,6 +55,19 @@
     },
     "dmg": {
       "writeUpdateInfo": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "PandaDoc Search"
     }
   },
   "dependencies": {

@@ -42,9 +42,8 @@ from an embedded browser — either use email/password, or set `openMode` to
 ## Configure
 
 Menu-bar icon → **Edit Config…** opens your `config.json`, at
-`~/Library/Application Support/PandaDoc Search/config.json` (in a dev run it's
-`.../pandadoc-search/`). It's created on first launch from the defaults in
-[config.js](config.js). Restart the app after editing.
+`~/Library/Application Support/pandadoc-search/config.json`. It's created on first
+launch from the defaults in [config.js](config.js). Restart the app after editing.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
