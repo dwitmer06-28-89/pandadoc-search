@@ -1,0 +1,8 @@
+<!-- Source of truth for the app icon. build/icon.png is rendered from this;
+     electron-builder derives the .icns and .ico from that PNG.
+     Inset by ~10% so the squircle matches the optical size of native icons. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1f2937"/>
+  <circle cx="453" cy="453" r="179" fill="none" stroke="#34d399" stroke-width="68"/>
+  <line x1="589" y1="589" x2="734" y2="734" stroke="#34d399" stroke-width="76" stroke-linecap="round"/>
+</svg>

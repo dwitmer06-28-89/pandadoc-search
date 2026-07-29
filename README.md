@@ -52,6 +52,8 @@ launch from the defaults in [config.js](config.js). Restart the app after editin
 | `extraParams` | `&filters=…` | Appended verbatim. Default decodes to `{"status":"2"}`. Empty string = no status filter. |
 | `openMode` | `in-app` | `in-app`, `chrome-app` (chrome-less Chrome window), or `browser` (default browser). |
 | `reloadOnSearch` | `false` | `in-app` only. Force a full page reload per search if results ever fail to refresh. |
+| `darkMode` | `true` | `in-app` only. Forces a dark PandaDoc via the [Dark Reader](https://darkreader.org/) engine. `false` = stock light UI. |
+| `darkModeOptions` | `{brightness:100, contrast:90, sepia:0}` | Dark Reader knobs. `brightness`/`contrast` are percentages (100 = unchanged); `sepia` and `grayscale` are 0–100. |
 | `closePreviousWindow` | `true` | `chrome-app` only. Closes the prior search window via AppleScript. |
 
 To change the status filter: set the filter you want in PandaDoc, copy the encoded

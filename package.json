@@ -22,7 +22,9 @@
       "preload.js",
       "index.html",
       "config.js",
-      "assets/**/*"
+      "assets/**/*",
+      "node_modules/darkreader/darkreader.js",
+      "node_modules/darkreader/package.json"
     ],
     "publish": [
       {
@@ -34,14 +36,19 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         }
       ],
       "hardenedRuntime": true,
@@ -57,10 +64,14 @@
       "writeUpdateInfo": false
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ]
     },
@@ -71,6 +82,7 @@
     }
   },
   "dependencies": {
+    "darkreader": "^4.9.128",
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {

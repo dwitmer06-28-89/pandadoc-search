@@ -1,12 +1,16 @@
 const {
   app,
+  BaseWindow,
   BrowserWindow,
+  WebContentsView,
+  webFrameMain,
   globalShortcut,
   ipcMain,
   shell,
   Tray,
   Menu,
   nativeImage,
+  nativeTheme,
   dialog,
 } = require('electron');
 const path = require('path');
@@ -36,7 +40,8 @@ function chromePath() {
 let win = null;
 let tray = null;
 let results = null; // the single reusable PandaDoc container window
-let currentUrl = null; // what that window was last told to load
+let resultsView = null; // the WebContentsView inside it holding PandaDoc
+let currentUrl = null; // what that view was last told to load
 let recents = [];
 
 const MAX_RECENTS = 3;
@@ -156,6 +161,178 @@ function closePreviousWindows(done) {
   execFile('osascript', ['-e', script], () => done());
 }
 
+// ---- forced dark mode ------------------------------------------------------
+// PandaDoc has no dark theme, so we run the Dark Reader engine (the same one
+// behind the browser extension) inside the results window and let it invert the
+// page dynamically.
+
+const DARK_BG = '#181a1b'; // Dark Reader's own page background
+let darkReaderSource = null;
+
+function loadDarkReader() {
+  if (darkReaderSource !== null) return darkReaderSource;
+  try {
+    darkReaderSource = fs.readFileSync(require.resolve('darkreader/darkreader.js'), 'utf8');
+  } catch {
+    darkReaderSource = ''; // missing dependency shouldn't stop the app opening
+  }
+  return darkReaderSource;
+}
+
+// Injected into the target's main world — Dark Reader expects to be a page
+// script, so a preload's isolated world is the wrong place for it. `target` is a
+// WebContents or a WebFrameMain; both take executeJavaScript.
+async function injectDarkReader(target) {
+  const src = loadDarkReader();
+  if (!src) return false;
+
+  try {
+    // The UMD bundle hangs itself off globalThis; re-running it after an
+    // in-page navigation would be wasted work.
+    const already = await target.executeJavaScript('typeof DarkReader !== "undefined"');
+    if (!already) await target.executeJavaScript(src);
+    await target.executeJavaScript(
+      `DarkReader.enable(${JSON.stringify(config.darkModeOptions || {})})`
+    );
+    return true;
+  } catch {
+    // Navigated away mid-injection, or the frame blocked eval — not fatal.
+    return false;
+  }
+}
+
+// Dark Reader only styles the document it was loaded into, so every frame needs
+// its own copy: PandaDoc renders a document/contract in an iframe, which is why
+// opening one from the results list came up light.
+async function applyDarkMode(wc) {
+  if (!config.darkMode) return null;
+
+  let frames;
+  try {
+    frames = wc.mainFrame.framesInSubtree; // includes the main frame
+  } catch {
+    return null; // window went away
+  }
+
+  await Promise.all(frames.map((frame) => injectDarkReader(frame)));
+
+  // The window background is matched to the top-level document's.
+  try {
+    return await wc.mainFrame.executeJavaScript(
+      'getComputedStyle(document.documentElement).backgroundColor'
+    );
+  } catch {
+    return null;
+  }
+}
+
+// Frames come and go long after the top-level document is ready — an iframe
+// created when you click into a document never sees `dom-ready`.
+function watchFramesForDarkMode(wc) {
+  if (!config.darkMode) return;
+
+  wc.on('did-frame-finish-load', (_e, isMainFrame, processId, routingId) => {
+    if (isMainFrame) return; // the dom-ready hook covers that one
+    const frame = webFrameMain.fromId(processId, routingId);
+    if (frame) injectDarkReader(frame);
+  });
+}
+
+// ---- the PandaDoc container window -----------------------------------------
+// Same shape as Driven's windows: `hiddenInset` so there's no separate titlebar
+// strip and the whole window reads as one rounded card, the way native Mac apps
+// look. That puts the traffic lights over the page, though, and unlike Driven we
+// don't own this page's layout — so PandaDoc gets its own WebContentsView, inset
+// below a strip that holds the traffic lights.
+//
+// `hiddenInset` means the content view covers the real titlebar, so the window
+// is only draggable where web content asks to be (Driven does this in its CSS).
+// The strip is therefore its own tiny view whose whole body is a drag region —
+// bare window background there would look identical but not move the window.
+
+const TOP_STRIP = 38;
+
+const STRIP_HTML =
+  'data:text/html;charset=utf-8,' +
+  encodeURIComponent(
+    '<style>html,body{margin:0;height:100%;background:transparent;' +
+      'cursor:default;-webkit-app-region:drag}</style>'
+  );
+
+function pageBackground() {
+  return config.darkMode ? DARK_BG : '#ffffff';
+}
+
+function createResultsWindow() {
+  const win = new BaseWindow({
+    width: 1440,
+    height: 900,
+    title: 'PandaDoc',
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 16, y: (TOP_STRIP - 12) / 2 },
+    // Matching the page keeps the strip from reading as a titlebar, and keeps
+    // the pre-paint flash from being a white rectangle.
+    backgroundColor: pageBackground(),
+    // Without this, the first click into an unfocused window is swallowed to
+    // activate it and everything needs clicking twice.
+    acceptFirstMouse: true,
+  });
+
+  const view = new WebContentsView({
+    webPreferences: {
+      // Its own persistent session, so you stay signed in between launches.
+      partition: 'persist:pandadoc',
+    },
+  });
+  view.setBackgroundColor(pageBackground());
+
+  const strip = new WebContentsView();
+  strip.setBackgroundColor(pageBackground());
+  strip.webContents.loadURL(STRIP_HTML);
+
+  win.contentView.addChildView(strip);
+  win.contentView.addChildView(view);
+
+  const layout = () => {
+    const { width, height } = win.getContentBounds();
+    strip.setBounds({ x: 0, y: 0, width, height: TOP_STRIP });
+    view.setBounds({
+      x: 0,
+      y: TOP_STRIP,
+      width,
+      height: Math.max(0, height - TOP_STRIP),
+    });
+  };
+  layout();
+  win.on('resize', layout);
+
+  watchFramesForDarkMode(view.webContents);
+
+  // Anything PandaDoc opens with window.open gets the same treatment, otherwise
+  // it arrives as a bare light window.
+  view.webContents.on('did-create-window', (child) => {
+    child.setBackgroundColor(pageBackground());
+    watchFramesForDarkMode(child.webContents);
+    child.webContents.on('dom-ready', () => applyDarkMode(child.webContents));
+  });
+
+  // Fires once per document load, before the page has done its own work — early
+  // enough that it's rarely seen light.
+  view.webContents.on('dom-ready', async () => {
+    const bg = await applyDarkMode(view.webContents);
+    // Dark Reader picks the page background from the original colours, so take
+    // it from the page rather than guessing — otherwise the drag strip is a
+    // slightly different dark and reads as a titlebar.
+    if (bg && !win.isDestroyed()) {
+      win.setBackgroundColor(bg);
+      view.setBackgroundColor(bg);
+      strip.setBackgroundColor(bg);
+    }
+  });
+
+  return { win, view };
+}
+
 // One window, reused forever. A second search replaces its URL rather than
 // stacking up another window.
 function openInApp(term, url) {
@@ -164,19 +341,20 @@ function openInApp(term, url) {
     // loaded page, so bring the window forward as-is instead. Only counts if the
     // window is still ON that search — if you clicked through to a document, the
     // live URL no longer carries the term and we do search again.
-    const live = results.webContents.getURL();
+    const wc = resultsView.webContents;
+    const live = wc.getURL();
     const unchanged =
       url === currentUrl && live.includes(`search=${encodeURIComponent(term)}`);
 
     if (!unchanged) {
       currentUrl = url;
-      results.webContents.loadURL(url);
+      wc.loadURL(url);
 
       if (config.reloadOnSearch) {
         // PandaDoc is a hash-routed SPA, so swapping only the #fragment is an
         // in-page navigation. If its router ever fails to pick that up, this
         // forces the new URL to render.
-        results.webContents.once('did-finish-load', () => results.webContents.reload());
+        wc.once('did-finish-load', () => wc.reload());
       }
     }
 
@@ -186,19 +364,10 @@ function openInApp(term, url) {
     return;
   }
 
-  results = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    title: 'PandaDoc',
-    backgroundColor: '#ffffff',
-    webPreferences: {
-      // Its own persistent session, so you stay signed in between launches.
-      partition: 'persist:pandadoc',
-    },
-  });
+  ({ win: results, view: resultsView } = createResultsWindow());
 
   currentUrl = url;
-  results.loadURL(url);
+  resultsView.webContents.loadURL(url);
 
   // The app is otherwise dock-less; give it a Dock icon while a real window is
   // up so Cmd-Tab and window management behave normally.
@@ -206,6 +375,7 @@ function openInApp(term, url) {
 
   results.on('closed', () => {
     results = null;
+    resultsView = null;
     currentUrl = null;
     if (app.dock) app.dock.hide();
   });
@@ -365,6 +535,9 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     if (app.dock) app.dock.hide();
     loadConfig();
+    // Makes prefers-color-scheme report dark (in case PandaDoc ever grows a
+    // dark theme of its own) and darkens scrollbars and native form controls.
+    if (config.darkMode) nativeTheme.themeSource = 'dark';
     loadRecents();
     createWindow();
     createTray();

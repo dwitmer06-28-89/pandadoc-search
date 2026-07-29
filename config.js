@@ -24,6 +24,18 @@ module.exports = {
   // reload after each search if results ever fail to refresh (slower).
   reloadOnSearch: false,
 
+  // in-app only. PandaDoc ships no dark theme, so force one by running the Dark
+  // Reader engine inside the results window. Set false for the stock light UI.
+  darkMode: true,
+
+  // Dark Reader knobs, only used when darkMode is true. brightness/contrast are
+  // percentages (100 = unchanged); sepia/grayscale are 0-100.
+  darkModeOptions: {
+    brightness: 100,
+    contrast: 90,
+    sepia: 0,
+  },
+
   // chrome-app only. Close a previously-opened PandaDoc search window before
   // opening the new one. Windows you've navigated away from (e.g. you clicked
   // into an actual document) are left alone.
