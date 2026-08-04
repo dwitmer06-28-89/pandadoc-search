@@ -37,6 +37,9 @@ Two buttons float over its bottom-right corner:
   shows which mode is on. The choice is saved to `config.json`, so it sticks.
 - **Green magnifier** — open the search bar over the window.
 
+Pressing **S** on the page does the same as the green magnifier — unless a text field
+has the caret, in which case it just types an `s`.
+
 The hotkey gets a first step while that window exists: one press brings the PandaDoc
 window forward (it's usually the results you already wanted, just buried), and a second
 press — now that it has focus — puts the search bar on top of it for a new search. The

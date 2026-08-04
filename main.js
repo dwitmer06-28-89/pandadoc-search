@@ -656,7 +656,9 @@ function createResultsWindow() {
     ' return !!el && (el.isContentEditable ||' +
     ' /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)); })()';
 
-  const navigateUnlessEditing = (delta) => {
+  // Runs `action` a beat later, but only if the caret wasn't in a text field
+  // when the key was pressed.
+  const unlessEditing = (action) => {
     let frame;
     try {
       frame = view.webContents.focusedFrame || view.webContents.mainFrame;
@@ -666,13 +668,26 @@ function createResultsWindow() {
     frame
       .executeJavaScript(EDITING_CHECK)
       .then((editing) => {
-        if (!editing) navigate(delta);
+        if (!editing) action();
       })
-      .catch(() => navigate(delta));
+      .catch(() => action());
   };
 
+  const navigateUnlessEditing = (delta) => unlessEditing(() => navigate(delta));
+
   view.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !input.meta || input.control || input.alt) return;
+    if (input.type !== 'keyDown') return;
+
+    // Bare "s" over the document is the same as the hotkey — but only when
+    // nothing is being typed into, so it can't eat a letter. The key isn't
+    // swallowed for the same reason the arrows aren't: whether it means
+    // anything here is only known once the editing check comes back.
+    if (!input.meta && !input.control && !input.alt && !input.shift) {
+      if (input.key === 's' || input.key === 'S') unlessEditing(show);
+      return;
+    }
+
+    if (!input.meta || input.control || input.alt) return;
 
     // Cmd+[ and Cmd+] mean nothing else, so they act immediately.
     if (input.key === '[' || input.key === ']') {
