@@ -165,7 +165,10 @@ function createAIWindow() {
     transparent: true,
     resizable: false,
     movable: true,
-    alwaysOnTop: true,
+    // Not alwaysOnTop and not a top-level window of its own: it's made a child of
+    // the PandaDoc window (see setParentWindow, below) so the OS stacks it with
+    // that window — above the page, but under any other app brought in front of
+    // it, and visible for as long as the page is, whatever else is focused.
     skipTaskbar: true,
     fullscreenable: false,
     hasShadow: false, // the CSS shadow draws the rounded card's own
@@ -177,13 +180,13 @@ function createAIWindow() {
     },
   });
 
-  aiWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   aiWin.loadFile('ai.html');
 
   // Unlike the search pill, this one does NOT dismiss on its own blur: an answer
   // is something you read while the contract sits behind it, and having it
-  // vanish the moment you click elsewhere in our own app would make it useless.
-  // It does follow the PandaDoc window, though — see refreshAIVisibility.
+  // vanish the moment you click elsewhere would make it useless. It rides with
+  // the PandaDoc window instead — shown and hidden with it, see
+  // refreshAIVisibility — and the OS keeps it on top of that window as a child.
   aiWin.on('blur', queueAIVisibility);
   aiWin.on('focus', queueAIVisibility);
 }
@@ -195,25 +198,19 @@ let aiReady = false;
 let aiWatch = null;
 
 // Whether the panel is *meant* to be up. Separate from whether it's on screen:
-// it belongs to the PandaDoc window, so it hides whenever that window isn't in
-// front and comes back when it is, without the user having to reopen it.
+// it belongs to the PandaDoc window, so it hides whenever that window is hidden
+// or minimised and comes back with it, without the user having to reopen it.
 let aiOpen = false;
 
-// The panel is a top-level window, so clicking it blurs the PandaDoc window, and
-// raising the search pill blurs both. "Our app is in front" is therefore about
-// the whole set, not any one of them.
-function appIsFront() {
-  return [win, results, aiWin].some(
-    (w) => w && !w.isDestroyed() && w.isFocused()
-  );
-}
-
+// The panel rides with the PandaDoc window as its child, so the OS handles
+// stacking — we only decide whether it should be on screen at all, which tracks
+// the PandaDoc window's presence, not which app happens to be focused. (Focusing
+// another app used to hide it; that's the bug this avoids.)
 function refreshAIVisibility() {
   if (!aiWin || aiWin.isDestroyed()) return;
   const showing =
     aiOpen &&
     aiReady &&
-    appIsFront() &&
     results &&
     !results.isDestroyed() &&
     results.isVisible() &&
@@ -977,6 +974,11 @@ function openInApp(term, url) {
     overlay: resultsOverlay,
   } = createResultsWindow());
 
+  // Hang the Claude panel off this window so the OS stacks and shows it with the
+  // window it talks about — kept out of createAIWindow because the window it
+  // parents to only exists now, and is remade on each fresh search.
+  if (aiWin && !aiWin.isDestroyed()) aiWin.setParentWindow(results);
+
   currentUrl = url;
   resultsView.webContents.loadURL(url);
   startAIWatch();
@@ -988,6 +990,8 @@ function openInApp(term, url) {
   results.on('closed', () => {
     stopAIWatch();
     hideAI();
+    // Its parent is going away; detach so the panel doesn't die with it.
+    if (aiWin && !aiWin.isDestroyed()) aiWin.setParentWindow(null);
     results = null;
     resultsView = null;
     resultsStrip = null;
