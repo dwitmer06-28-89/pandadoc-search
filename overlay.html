@@ -44,6 +44,15 @@
       }
       .theme:hover { background: rgba(55, 65, 81, 0.95); }
 
+      /* Violet, matching the AI pill's send button — a different colour from the
+         emerald search so the two aren't mistaken for each other mid-reach. */
+      /* Hidden until the main process says a loaded contract is on screen, so it
+         never appears over the search results list or a half-rendered document.
+         Starting hidden means it can't flash on before the first word arrives. */
+      .ai { display: none; background: #a78bfa; }
+      .ai.on { display: grid; }
+      .ai:hover { background: #b9a2fc; }
+
       /* The app icon's palette: emerald, matching the send button in the pill. */
       .search { background: #34d399; }
       .search:hover { background: #4ee0aa; }
@@ -51,6 +60,13 @@
   </head>
   <body>
     <button class="theme" id="theme" title="Toggle dark mode"></button>
+
+    <button class="ai" id="ai" title="Assess this contract with Claude  (A)">
+      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#1f2937" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 2.4 11.6 7 16.2 8.6 11.6 10.2 10 14.8 8.4 10.2 3.8 8.6 8.4 7Z" />
+        <path d="M15.4 13.4 16 15.1 17.7 15.7 16 16.3 15.4 18 14.8 16.3 13.1 15.7 14.8 15.1Z" />
+      </svg>
+    </button>
 
     <button class="search" id="search" title="Search PandaDoc">
       <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#1f2937" stroke-width="2.4" stroke-linecap="round">
@@ -81,7 +97,16 @@
         theme.title = dark ? 'Dark mode on' : 'Dark mode off';
       });
 
+      const ai = document.getElementById('ai');
+
+      // Only offered once a contract is open and finished rendering — see
+      // startAIWatch() in main.js.
+      window.overlay.onAIAvailable((_e, available) => {
+        ai.classList.toggle('on', !!available);
+      });
+
       theme.addEventListener('click', () => window.overlay.toggleDark());
+      ai.addEventListener('click', () => window.overlay.ai());
       document.getElementById('search').addEventListener('click', () => window.overlay.search());
 
       window.overlay.ready();

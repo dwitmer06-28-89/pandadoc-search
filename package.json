@@ -25,6 +25,9 @@
       "overlay.html",
       "shell-preload.js",
       "shell.html",
+      "ai-preload.js",
+      "ai.html",
+      "assess.js",
       "config.js",
       "assets/**/*",
       "node_modules/darkreader/darkreader.js",
@@ -86,6 +89,7 @@
     }
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "darkreader": "^4.9.128",
     "electron-updater": "^6.3.9"
   },

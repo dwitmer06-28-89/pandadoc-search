@@ -23,7 +23,8 @@ To have it always running, add it to **System Settings → General → Login Ite
 - **Enter** (or the ↑ button) — search
 - **Escape**, or click outside the bar — dismiss
 - Your last three searches appear as chips; click one to re-run it
-- Menu-bar icon → **Check for Updates…**, **Edit Config…**, **Quit**
+- Menu-bar icon → **Assess Contract with Claude**, **Check for Updates…**,
+  **Edit Config…**, **Quit**
 
 Clicking the chip for the search that's already on screen just brings the window
 forward instead of reloading it. If you'd clicked through into a document, the window
@@ -31,19 +32,65 @@ is no longer on that search, so it does re-run it.
 
 ### Once a results window is open
 
-Two buttons float over its bottom-right corner:
+Three buttons float over its bottom-right corner:
 
 - **Moon / sun** — toggle dark mode on the page you're looking at, no reload. The icon
   shows which mode is on. The choice is saved to `config.json`, so it sticks.
+- **Violet sparkle** — assess the contract on screen with Claude. See below.
 - **Green magnifier** — open the search bar over the window.
 
-Pressing **S** on the page does the same as the green magnifier — unless a text field
-has the caret, in which case it just types an `s`.
+Pressing **S** on the page does the same as the green magnifier, and **A** does the same
+as the sparkle — unless a text field has the caret, in which case they just type the
+letter.
 
 The hotkey gets a first step while that window exists: one press brings the PandaDoc
 window forward (it's usually the results you already wanted, just buried), and a second
 press — now that it has focus — puts the search bar on top of it for a new search. The
 green magnifier is the same thing without the first press.
+
+### Assessing a contract with Claude
+
+**A** over the document, the violet sparkle, or the menu-bar item opens a second pill
+over the window. It reads whatever document is on screen and runs an assessment against
+it.
+
+The chips under the pill are the assessments — named instructions that ship with the
+app: **Risk scan**, **Key terms**, **Renewal & exit**, **Payment terms**, **Obligations**.
+Click one and the answer streams in below. Or type a question and press Enter; follow-up
+questions keep the same document and the previous answers in context, so you can drill in
+without re-explaining. **New** starts a fresh thread, **Copy** takes the answer as
+markdown.
+
+**Edit…** opens the assessment editor. Add, reword, or remove them — they're saved to
+`assessments.json` in the app's data folder, so they survive updates. Saving an empty
+list restores the shipped set. This is where to put the checks your own contracts need
+rather than adapting to the defaults.
+
+The thread resets when you navigate to a different document, and after ten minutes idle.
+
+#### Connecting it
+
+The first time you open the panel it asks for an Anthropic API key
+([console.anthropic.com](https://console.anthropic.com/settings/keys)). It's encrypted
+with your login keychain and stored outside `config.json`, so it isn't sitting in the
+file you edit by hand.
+
+Note this is an **Anthropic API account**, which is separate from a Claude.ai Pro or Max
+subscription and billed per token — there's no way for a third-party app to bill
+inference to a Claude.ai subscription. Assessments run on your own account, and the
+document text is sent to the Anthropic API to produce them.
+
+#### How the document is read
+
+Text is pulled straight from the page — PandaDoc renders an opened document in an
+iframe, so every frame is asked and the longest answer wins. If there isn't enough
+selectable text to assess (an unopened results list, or a viewer that draws to canvas),
+it falls back to a screenshot of the visible area and says so in the answer's header, so
+you know it only saw one page. Very long documents are cut off with a note rather than
+silently truncated.
+
+It's a contract reader, not a lawyer — it's told to quote the clause it's relying on and
+to say when a term is absent rather than inferring one.
 
 ### Navigating
 

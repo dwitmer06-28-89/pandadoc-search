@@ -12,11 +12,13 @@ const {
   nativeImage,
   nativeTheme,
   dialog,
+  safeStorage,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
+const assess = require('./assess');
 
 // config.js holds the shipped defaults (read-only inside the packaged .app).
 // Real settings live in a config.json under userData so each person can edit
@@ -38,6 +40,7 @@ function chromePath() {
 }
 
 let win = null;
+let aiWin = null; // the Claude panel, a second always-on-top pill
 let tray = null;
 let results = null; // the single reusable PandaDoc container window
 let resultsView = null; // the WebContentsView inside it holding PandaDoc
@@ -141,6 +144,112 @@ function show() {
 
 function hide() {
   if (win && win.isVisible()) win.hide();
+}
+
+// ---- the Claude panel -------------------------------------------------------
+// Built like the search pill — frameless, transparent, always on top — because
+// it does the same job: appear over whatever you're reading, take one line of
+// input, get out of the way. It's just taller, since it has an answer to show.
+
+function createAIWindow() {
+  aiWin = new BrowserWindow({
+    width: 764,
+    height: 260,
+    useContentSize: true,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    hasShadow: false, // the CSS shadow draws the rounded card's own
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'ai-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  aiWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  aiWin.loadFile('ai.html');
+
+  // Unlike the search pill, this one does NOT dismiss on blur: an answer is
+  // something you read while clicking around the contract behind it, and having
+  // it vanish the moment you scroll the document would make it useless.
+}
+
+// Whether a loaded contract is on screen. The AI button only exists while this
+// is true, so it can't be offered on the search results list or against a
+// half-rendered document.
+let aiReady = false;
+let aiWatch = null;
+
+function sendAIAvailable() {
+  if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
+  resultsOverlay.webContents.send('overlay:ai-available', aiReady);
+}
+
+// Readiness isn't a single event. The document iframe loads, and only then sits
+// on "Connecting…" for a while before it renders — so `did-frame-finish-load`
+// fires well before there's anything to assess. A one-second poll of the frame's
+// own text is both simpler and more accurate than trying to pick the right event.
+function startAIWatch() {
+  stopAIWatch();
+  aiWatch = setInterval(async () => {
+    if (!results || results.isDestroyed()) {
+      stopAIWatch();
+      return;
+    }
+    const { ready } = await assess.contractStatus();
+    if (ready === aiReady) return;
+    aiReady = ready;
+    sendAIAvailable();
+    // Navigated off the contract the open panel was talking about — its context
+    // is gone (the thread has already been reset), so don't leave it up.
+    if (!ready) hideAI();
+  }, 1000);
+}
+
+function stopAIWatch() {
+  if (aiWatch) {
+    clearInterval(aiWatch);
+    aiWatch = null;
+  }
+  aiReady = false;
+}
+
+// `quiet` is for the paths that are already gated — the bare `a` key and the
+// overlay button, which isn't rendered when there's nothing to assess. The tray
+// item is always clickable, so it explains itself instead of doing nothing.
+function showAI(opts = {}) {
+  if (!aiReady) {
+    if (!opts.quiet) {
+      dialog.showMessageBox({
+        type: 'info',
+        message: 'Open a contract first',
+        detail:
+          'Claude assesses the document on screen. Search for a contract, click ' +
+          'into it, and let it finish loading — then the violet button appears ' +
+          'over the bottom-right corner.',
+      });
+    }
+    return;
+  }
+  if (!aiWin || aiWin.isDestroyed()) return;
+  if (!aiWin.isVisible()) aiWin.center();
+  aiWin.show();
+  aiWin.focus();
+  aiWin.webContents.send('ai:open', {
+    hasKey: assess.hasKey(),
+    assessments: assess.loadAssessments(),
+  });
+}
+
+function hideAI() {
+  if (aiWin && !aiWin.isDestroyed() && aiWin.isVisible()) aiWin.hide();
 }
 
 // What the hotkey does. Once there's a PandaDoc window open, the first press
@@ -501,11 +610,13 @@ function pageBackground() {
 }
 
 // ---- the floating controls -------------------------------------------------
-// A dark-mode toggle and a search button, in their own transparent view pinned
-// over the bottom-right of PandaDoc. Small on purpose: the view swallows clicks
-// wherever it sits, so it covers only the corner it needs.
+// A dark-mode toggle, an AI button, and a search button, in their own
+// transparent view pinned over the bottom-right of PandaDoc. Small on purpose:
+// the view swallows clicks wherever it sits, so it covers only the corner it
+// needs — the width is three 38px buttons plus the gaps and padding set in
+// overlay.html, and has to grow with them.
 
-const OVERLAY_W = 120;
+const OVERLAY_W = 160;
 const OVERLAY_H = 64;
 
 function sendDarkState() {
@@ -678,12 +789,16 @@ function createResultsWindow() {
   view.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
 
-    // Bare "s" over the document is the same as the hotkey — but only when
-    // nothing is being typed into, so it can't eat a letter. The key isn't
-    // swallowed for the same reason the arrows aren't: whether it means
-    // anything here is only known once the editing check comes back.
+    // Bare "s" over the document is the same as the hotkey, and bare "a" raises
+    // the Claude panel — but only when nothing is being typed into, so they
+    // can't eat a letter. The keys aren't swallowed for the same reason the
+    // arrows aren't: whether they mean anything here is only known once the
+    // editing check comes back.
     if (!input.meta && !input.control && !input.alt && !input.shift) {
       if (input.key === 's' || input.key === 'S') unlessEditing(show);
+      else if (input.key === 'a' || input.key === 'A') {
+        unlessEditing(() => showAI({ quiet: true }));
+      }
       return;
     }
 
@@ -704,6 +819,14 @@ function createResultsWindow() {
   win.on('swipe', (_e, direction) => {
     if (direction === 'right') navigate(-1);
     else if (direction === 'left') navigate(1);
+  });
+
+  // A different document means the Claude thread is about a contract that is no
+  // longer on screen — start over rather than answering follow-ups from the old
+  // one. PandaDoc is hash-routed, so most of these are in-page navigations.
+  view.webContents.on('did-navigate', () => assess.resetThread());
+  view.webContents.on('did-navigate-in-page', (_e, _url, isMainFrame) => {
+    if (isMainFrame) assess.resetThread();
   });
 
   watchFramesForDarkMode(view.webContents);
@@ -775,12 +898,15 @@ function openInApp(term, url) {
 
   currentUrl = url;
   resultsView.webContents.loadURL(url);
+  startAIWatch();
 
   // The app is otherwise dock-less; give it a Dock icon while a real window is
   // up so Cmd-Tab and window management behave normally.
   if (app.dock) app.dock.show();
 
   results.on('closed', () => {
+    stopAIWatch();
+    hideAI();
     results = null;
     resultsView = null;
     resultsStrip = null;
@@ -828,11 +954,50 @@ ipcMain.on('search', (_e, term) => {
 ipcMain.on('cancel', () => hide());
 
 // ---- the floating controls' channels ----------------------------------------
-ipcMain.on('overlay:ready', () => sendDarkState());
+ipcMain.on('overlay:ready', () => {
+  sendDarkState();
+  sendAIAvailable();
+});
 ipcMain.on('overlay:toggle-dark', () => toggleDarkMode());
+ipcMain.on('overlay:ai', () => showAI({ quiet: true }));
 // The search button just raises the same pill the hotkey does; the pill is
 // always-on-top, so it lands over the PandaDoc window.
 ipcMain.on('overlay:search', () => show());
+
+// ---- the Claude panel's channels --------------------------------------------
+ipcMain.on('ai:cancel', () => hideAI());
+
+ipcMain.on('ai:resize', (_e, height) => {
+  if (!aiWin || aiWin.isDestroyed()) return;
+  const [w] = aiWin.getContentSize();
+  aiWin.setContentSize(w, Math.max(160, Math.round(height)));
+});
+
+// The panel asks for its own state once loaded, since it may finish loading
+// after the click that opened it.
+ipcMain.on('ai:ready', () => {
+  if (!aiWin || aiWin.isDestroyed()) return;
+  aiWin.webContents.send('ai:open', {
+    hasKey: assess.hasKey(),
+    assessments: assess.loadAssessments(),
+  });
+});
+
+ipcMain.on('ai:open-key-page', () => {
+  shell.openExternal('https://console.anthropic.com/settings/keys');
+});
+
+ipcMain.handle('ai:save-key', (_e, key) => {
+  assess.saveKey(key);
+  // A new key means a new account — don't carry a half-finished thread over.
+  assess.resetThread();
+  return { hasKey: assess.hasKey() };
+});
+
+ipcMain.handle('ai:get-assessments', () => assess.loadAssessments());
+ipcMain.handle('ai:save-assessments', (_e, list) => assess.saveAssessments(list));
+
+ipcMain.handle('ai:ask', (evt, payload) => assess.ask(evt.sender, payload || {}));
 
 // ---- the results window's own chrome ----------------------------------------
 // Its traffic lights are drawn in shell.html, because macOS won't render the
@@ -967,6 +1132,7 @@ function createTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Search  (${config.hotkey})`, click: show },
+      { label: 'Assess Contract with Claude  (A)', click: showAI },
       { type: 'separator' },
       {
         label: 'Edit Config…',
@@ -995,7 +1161,21 @@ if (!app.requestSingleInstanceLock()) {
     // dark theme of its own) and darkens scrollbars and native form controls.
     if (config.darkMode) nativeTheme.themeSource = 'dark';
     loadRecents();
+
+    // The AI side reads whatever document the results window is showing, so it
+    // gets a getter rather than a reference — the view is replaced every time
+    // that window is closed and reopened.
+    assess.init({
+      app,
+      safeStorage,
+      getContractView: () =>
+        resultsView && !resultsView.webContents.isDestroyed()
+          ? resultsView.webContents
+          : null,
+    });
+
     createWindow();
+    createAIWindow();
     createTray();
     setupUpdater();
 

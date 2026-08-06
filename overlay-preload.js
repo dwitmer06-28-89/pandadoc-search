@@ -6,6 +6,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('overlay', {
   ready: () => ipcRenderer.send('overlay:ready'),
   toggleDark: () => ipcRenderer.send('overlay:toggle-dark'),
+  ai: () => ipcRenderer.send('overlay:ai'),
   search: () => ipcRenderer.send('overlay:search'),
   onDarkState: (cb) => ipcRenderer.on('overlay:dark-state', cb),
+  onAIAvailable: (cb) => ipcRenderer.on('overlay:ai-available', cb),
 });
