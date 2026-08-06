@@ -131,7 +131,11 @@ function createWindow() {
   win.loadFile('index.html');
 
   // Dismiss when it loses focus, like Spotlight.
-  win.on('blur', () => hide());
+  win.on('blur', () => {
+    hide();
+    queueAIVisibility();
+  });
+  win.on('focus', queueAIVisibility);
 }
 
 function show() {
@@ -176,9 +180,12 @@ function createAIWindow() {
   aiWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   aiWin.loadFile('ai.html');
 
-  // Unlike the search pill, this one does NOT dismiss on blur: an answer is
-  // something you read while clicking around the contract behind it, and having
-  // it vanish the moment you scroll the document would make it useless.
+  // Unlike the search pill, this one does NOT dismiss on its own blur: an answer
+  // is something you read while the contract sits behind it, and having it
+  // vanish the moment you click elsewhere in our own app would make it useless.
+  // It does follow the PandaDoc window, though — see refreshAIVisibility.
+  aiWin.on('blur', queueAIVisibility);
+  aiWin.on('focus', queueAIVisibility);
 }
 
 // Whether a loaded contract is on screen. The AI button only exists while this
@@ -186,6 +193,50 @@ function createAIWindow() {
 // half-rendered document.
 let aiReady = false;
 let aiWatch = null;
+
+// Whether the panel is *meant* to be up. Separate from whether it's on screen:
+// it belongs to the PandaDoc window, so it hides whenever that window isn't in
+// front and comes back when it is, without the user having to reopen it.
+let aiOpen = false;
+
+// The panel is a top-level window, so clicking it blurs the PandaDoc window, and
+// raising the search pill blurs both. "Our app is in front" is therefore about
+// the whole set, not any one of them.
+function appIsFront() {
+  return [win, results, aiWin].some(
+    (w) => w && !w.isDestroyed() && w.isFocused()
+  );
+}
+
+function refreshAIVisibility() {
+  if (!aiWin || aiWin.isDestroyed()) return;
+  const showing =
+    aiOpen &&
+    aiReady &&
+    appIsFront() &&
+    results &&
+    !results.isDestroyed() &&
+    results.isVisible() &&
+    !results.isMinimized();
+
+  if (showing) {
+    if (!aiWin.isVisible()) aiWin.showInactive();
+  } else if (aiWin.isVisible()) {
+    aiWin.hide();
+  }
+}
+
+// Focus moves in two steps — the old window blurs before the new one focuses —
+// so answering on the blur alone would hide the panel every time you click it.
+// A tick's delay lets the pair settle before anything is decided.
+let aiVisibilityTimer = null;
+function queueAIVisibility() {
+  if (aiVisibilityTimer) return;
+  aiVisibilityTimer = setTimeout(() => {
+    aiVisibilityTimer = null;
+    refreshAIVisibility();
+  }, 0);
+}
 
 function sendAIAvailable() {
   if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
@@ -239,7 +290,14 @@ function showAI(opts = {}) {
     return;
   }
   if (!aiWin || aiWin.isDestroyed()) return;
+  // The panel only shows over the PandaDoc window, so asking for it from the
+  // tray — where that window may be buried — has to bring it up too.
+  if (results && !results.isDestroyed()) {
+    if (results.isMinimized()) results.restore();
+    if (!results.isVisible()) results.show();
+  }
   if (!aiWin.isVisible()) aiWin.center();
+  aiOpen = true;
   aiWin.show();
   aiWin.focus();
   aiWin.webContents.send('ai:open', {
@@ -248,7 +306,10 @@ function showAI(opts = {}) {
   });
 }
 
+// Dismissal, not concealment: the panel stays down until it's asked for again.
+// Everything that hides it temporarily goes through refreshAIVisibility instead.
 function hideAI() {
+  aiOpen = false;
   if (aiWin && !aiWin.isDestroyed() && aiWin.isVisible()) aiWin.hide();
 }
 
@@ -738,8 +799,28 @@ function createResultsWindow() {
       strip.webContents.send('shell:focus', active);
     }
   };
-  win.on('focus', () => tellFocus(true));
-  win.on('blur', () => tellFocus(false));
+  win.on('focus', () => {
+    tellFocus(true);
+    queueAIVisibility();
+  });
+  win.on('blur', () => {
+    tellFocus(false);
+    queueAIVisibility();
+  });
+
+  // The Claude panel is a floating window of its own, so nothing would otherwise
+  // take it away when this one goes behind another app, is minimised, or hides.
+  win.on('hide', queueAIVisibility);
+  win.on('show', queueAIVisibility);
+  win.on('minimize', queueAIVisibility);
+  win.on('restore', queueAIVisibility);
+
+  // Clicking the document means you're done with the answer. Fires for clicks in
+  // PandaDoc's iframes too, and never for clicks on the panel itself — that's a
+  // separate window and its events don't reach this view.
+  view.webContents.on('input-event', (_e, input) => {
+    if (input.type === 'mouseDown') hideAI();
+  });
   strip.webContents.on('did-finish-load', () => {
     tellFocus(win.isFocused());
     strip.webContents.send('shell:chrome', pageBackground());
