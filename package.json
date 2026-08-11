@@ -10,6 +10,7 @@
     "url": "https://github.com/dwitmer06-28-89/pandadoc-search.git"
   },
   "scripts": {
+    "install-desktop": "bash scripts/install-desktop.sh",
     "start": "electron .",
     "build": "electron-builder --mac",
     "release": "electron-builder --mac --publish always"
