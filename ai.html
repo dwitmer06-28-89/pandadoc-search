@@ -502,6 +502,15 @@
       let view = 'idle';    // idle | answer | error | setup | editor
       let docTitle = '';
 
+      // The contract these answers are about. Compared rather than counted, so
+      // leaving a document and coming back to it keeps the thread — only a
+      // switch to a DIFFERENT one starts over.
+      let contract = null;
+
+      // Bumped by reset(), so a run that was cleared out from under it — a switch
+      // mid-stream, the cancel button — knows not to paint what it came back with.
+      let runId = 0;
+
       // Whether to keep following the tail of the answer as it streams. Cleared
       // when you scroll up to read something, set again if you scroll back down.
       let stick = true;
@@ -700,6 +709,7 @@
       }
 
       function reset() {
+        runId += 1;
         answer = '';
         streaming = false;
         stick = true;
@@ -933,7 +943,12 @@
         setBusy(true);
         renderAnswer('Reading the document…');
 
+        const mine = runId;
         const res = await window.ai.ask({ question, instruction, fresh, attachments });
+        // Cleared while this was in flight — the panel has moved on to another
+        // contract, or you cancelled. Painting the answer now would put it under
+        // a document it isn't about.
+        if (mine !== runId) return;
 
         streaming = false;
         setBusy(false);
@@ -1082,15 +1097,34 @@
         if (e.key === 'Escape' && !e.target.closest('.field')) window.ai.cancel();
       });
 
+      // Whether the panel is now looking at a different contract than the answers
+      // on it are about. A missing key is "can't tell", not "a new one" — the
+      // panel is dismissed, not cleared, so an answer is only thrown away on a
+      // switch we're sure of.
+      function switchedContract(key) {
+        if (!key || key === contract) return false;
+        const had = !!contract;
+        contract = key;
+        return had;
+      }
+
       // Opened by the hotkey, the overlay button, or `a` over the document.
       window.ai.onOpen((state) => {
         assessments = (state && state.assessments) || [];
+        const switched = switchedContract(state && state.contract);
         if (state && !state.hasKey) { showSetup(); return; }
-        if (view === 'setup' || view === 'editor') reset();
+        if (switched || view === 'setup' || view === 'editor') reset();
         else renderChips();
         fit();
         q.focus();
         q.select();
+      });
+
+      // The document changed behind a panel that's already up. Its answers are
+      // about a contract that has left the screen, and a follow-up typed into it
+      // would append under them as though it were the same conversation.
+      window.ai.onContract((key) => {
+        if (switchedContract(key)) reset();
       });
 
       window.ai.ready();

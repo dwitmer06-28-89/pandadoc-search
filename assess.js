@@ -215,6 +215,34 @@ function isDocFrame(frame) {
 // and captureContract() falls back to a screenshot for it.
 const READY_CHARS = 200;
 
+// WHICH contract is on screen, as an identity that stays the same across a
+// re-render and differs between documents. The document lives in an
+// `app.pandadoc.com/e/<id>` iframe, so that id is the document itself — the
+// outer window is hash-routed and its URL is as often the search you arrived
+// from as the thing you clicked into. Only the id, so a query string or an extra
+// path segment added per view doesn't read as a different contract.
+function contractKey() {
+  const wc = getContractView();
+  if (!wc || wc.isDestroyed()) return null;
+
+  let frames = [];
+  try {
+    frames = wc.mainFrame.framesInSubtree;
+  } catch {
+    return null;
+  }
+
+  const doc = frames.find(isDocFrame);
+  if (!doc) return null;
+
+  try {
+    const found = /\/e\/([^/?#]+)/i.exec(doc.url || '');
+    return found ? found[1] : null;
+  } catch {
+    return null; // frame went away mid-read
+  }
+}
+
 async function contractStatus() {
   const wc = getContractView();
   if (!wc || wc.isDestroyed()) return { ready: false };
@@ -573,6 +601,7 @@ module.exports = {
   loadAssessments,
   saveAssessments,
   contractStatus,
+  contractKey,
   captureContract,
   resetThread,
   ask,

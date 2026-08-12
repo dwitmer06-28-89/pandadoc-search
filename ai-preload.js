@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld('ai', {
   openKeyPage: () => ipcRenderer.send('ai:open-key-page'),
 
   onOpen: (cb) => ipcRenderer.on('ai:open', (_e, state) => cb(state)),
+  onContract: (cb) => ipcRenderer.on('ai:contract', (_e, key) => cb(key)),
   onDelta: (cb) => ipcRenderer.on('ai:delta', (_e, text) => cb(text)),
 });

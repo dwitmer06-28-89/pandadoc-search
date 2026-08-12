@@ -47,6 +47,7 @@ let resultsView = null; // the WebContentsView inside it holding PandaDoc
 let resultsStrip = null; // the drag strip above it
 let resultsOverlay = null; // the floating dark-mode/search controls over it
 let currentUrl = null; // what that view was last told to load
+let aiDocKey = null; // the contract the thread and the panel's answers are about
 let recents = [];
 
 const MAX_RECENTS = 3;
@@ -252,13 +253,36 @@ function startAIWatch() {
       return;
     }
     const { ready } = await assess.contractStatus();
+
+    noteContract();
+
     if (ready === aiReady) return;
     aiReady = ready;
     sendAIAvailable();
-    // Navigated off the contract the open panel was talking about — its context
-    // is gone (the thread has already been reset), so don't leave it up.
+    // Navigated off the contract the open panel was talking about — it isn't
+    // there to be assessed any more, so don't leave the panel up over it. The
+    // thread stays: coming back to it should still take a follow-up.
     if (!ready) hideAI();
   }, 1000);
+}
+
+// The thread belongs to a DOCUMENT, not to a navigation. PandaDoc's router fires
+// on plenty of things that leave the same contract on screen, and closing a
+// contract and coming back to it should still answer a follow-up — so the thread
+// is thrown away when the document actually changes to a different one, which is
+// something only the page can tell us. Hence here rather than on 'did-navigate':
+// at navigation time the new document's frame doesn't exist yet, and a page with
+// no contract on it at all (a search, a folder listing) is a pass-through, not a
+// switch. A visible panel is told too, since it holds the answers about the
+// document that just left and nothing else would clear them.
+function noteContract() {
+  const key = assess.contractKey();
+  if (!key || key === aiDocKey) return;
+  if (aiDocKey) assess.resetThread();
+  aiDocKey = key;
+  if (aiWin && !aiWin.isDestroyed() && aiWin.isVisible()) {
+    aiWin.webContents.send('ai:contract', key);
+  }
 }
 
 function stopAIWatch() {
@@ -287,6 +311,10 @@ function showAI(opts = {}) {
     return;
   }
   if (!aiWin || aiWin.isDestroyed()) return;
+  // Opened by hand can beat the poll to a document that just loaded, and the
+  // panel is about to be told which contract it's showing — settle that first so
+  // the two agree.
+  noteContract();
   // The panel only shows over the PandaDoc window, so asking for it from the
   // tray — where that window may be buried — has to bring it up too.
   if (results && !results.isDestroyed()) {
@@ -300,6 +328,7 @@ function showAI(opts = {}) {
   aiWin.webContents.send('ai:open', {
     hasKey: assess.hasKey(),
     assessments: assess.loadAssessments(),
+    contract: aiDocKey,
   });
 }
 
@@ -899,14 +928,6 @@ function createResultsWindow() {
     else if (direction === 'left') navigate(1);
   });
 
-  // A different document means the Claude thread is about a contract that is no
-  // longer on screen — start over rather than answering follow-ups from the old
-  // one. PandaDoc is hash-routed, so most of these are in-page navigations.
-  view.webContents.on('did-navigate', () => assess.resetThread());
-  view.webContents.on('did-navigate-in-page', (_e, _url, isMainFrame) => {
-    if (isMainFrame) assess.resetThread();
-  });
-
   watchFramesForDarkMode(view.webContents);
 
   // Anything PandaDoc opens with window.open gets the same treatment, otherwise
@@ -997,6 +1018,10 @@ function openInApp(term, url) {
     resultsStrip = null;
     resultsOverlay = null;
     currentUrl = null;
+    // aiDocKey deliberately survives the window: closing it and opening the same
+    // contract again is coming back to that contract, and the thread is keyed on
+    // the document, not on how long the window it was in stayed up. The ten-minute
+    // idle reset is what ends a thread nobody came back to.
     if (app.dock) app.dock.hide();
   });
 }
@@ -1065,6 +1090,7 @@ ipcMain.on('ai:ready', () => {
   aiWin.webContents.send('ai:open', {
     hasKey: assess.hasKey(),
     assessments: assess.loadAssessments(),
+    contract: aiDocKey,
   });
 });
 
