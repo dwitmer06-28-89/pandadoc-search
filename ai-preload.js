@@ -8,10 +8,12 @@ contextBridge.exposeInMainWorld('ai', {
   resize: (height) => ipcRenderer.send('ai:resize', height),
 
   ask: (payload) => ipcRenderer.invoke('ai:ask', payload),
-  saveKey: (key) => ipcRenderer.invoke('ai:save-key', key),
+  authStatus: () => ipcRenderer.invoke('ai:auth-status'),
+  signIn: () => ipcRenderer.invoke('ai:sign-in'),
+  signOut: () => ipcRenderer.invoke('ai:sign-out'),
   getAssessments: () => ipcRenderer.invoke('ai:get-assessments'),
   saveAssessments: (list) => ipcRenderer.invoke('ai:save-assessments', list),
-  openKeyPage: () => ipcRenderer.send('ai:open-key-page'),
+  openDocs: () => ipcRenderer.send('ai:open-docs'),
 
   onOpen: (cb) => ipcRenderer.on('ai:open', (_e, state) => cb(state)),
   onContract: (cb) => ipcRenderer.on('ai:contract', (_e, key) => cb(key)),

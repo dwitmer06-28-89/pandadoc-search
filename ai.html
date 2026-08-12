@@ -280,7 +280,7 @@
       /* Answers can be long; the card scrolls rather than the window growing
          without limit. The cap is in vh so it tracks the display. */
       .body {
-        max-height: 46vh;
+        max-height: 69vh;
         overflow-y: auto;
         padding: 14px 18px 16px;
         font-size: 14.5px;
@@ -365,7 +365,7 @@
         -webkit-user-select: text;
       }
 
-      /* ---- key setup + assessment editor ---- */
+      /* ---- sign-in + assessment editor ---- */
       .panel { padding: 16px 18px 18px; }
       .panel h2 {
         margin-bottom: 5px;
@@ -424,7 +424,46 @@
       .btn.danger { background: transparent; border: 1px solid rgba(252, 165, 165, 0.3); color: #fca5a5; }
       .btn.danger:hover { background: rgba(252, 165, 165, 0.1); }
 
-      .editor { max-height: 46vh; overflow-y: auto; }
+      /* A command to run in Terminal, next to the button that copies it. */
+      .cmd {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 9px;
+      }
+      .cmd code {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        padding: 8px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        color: #d4d4d8;
+        font: 400 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: nowrap;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .step {
+        margin-bottom: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: rgba(255, 255, 255, 0.42);
+      }
+      .who {
+        margin-bottom: 13px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #ececed;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .who b { font-weight: 600; }
+      .warn { color: #fca5a5; }
+
+      .editor { max-height: 69vh; overflow-y: auto; }
       .item {
         padding: 12px 0;
         border-top: 1px solid rgba(255, 255, 255, 0.07);
@@ -501,6 +540,10 @@
       let streaming = false;
       let view = 'idle';    // idle | answer | error | setup | editor
       let docTitle = '';
+
+      // Who's signed in, as last reported by the main process. Refreshed every
+      // time the panel opens, and while the setup screen watches for a login.
+      let auth = { signedIn: false, cli: false, email: '', organization: '' };
 
       // The contract these answers are about. Compared rather than counted, so
       // leaving a document and coming back to it keeps the thread — only a
@@ -710,6 +753,7 @@
 
       function reset() {
         runId += 1;
+        stopPolling();
         answer = '';
         streaming = false;
         stick = true;
@@ -752,6 +796,21 @@
         edit.disabled = busy;
         edit.addEventListener('click', showEditor);
         chips.appendChild(edit);
+
+        // Which account is being billed, and the way to sign out of it. Only
+        // worth a chip once someone is signed in — before that the whole panel
+        // is the setup screen anyway.
+        if (auth.signedIn) {
+          const acct = document.createElement('button');
+          acct.className = 'chip ghost';
+          acct.innerHTML = '<span>Account</span>';
+          acct.title = `Signed in as ${auth.email || 'your Claude account'}${
+            auth.organization ? ` · ${auth.organization}` : ''
+          }${auth.console ? ' — using API billing, not your plan' : ''}`;
+          acct.disabled = busy;
+          acct.addEventListener('click', () => showSetup());
+          chips.appendChild(acct);
+        }
 
         fit();
       }
@@ -953,7 +1012,7 @@
         streaming = false;
         setBusy(false);
 
-        if (res && res.error === 'no-key') { showSetup(); return; }
+        if (res && res.error === 'no-login') { showSetup(res.notice); return; }
         if (res && res.error) {
           // Keep a partial answer rather than throwing it away on a late error.
           if (answer.trim()) renderAnswer(res.error);
@@ -977,38 +1036,185 @@
         renderAnswer('');
       });
 
-      // ---- key setup ----------------------------------------------------------
-      function showSetup() {
+      // ---- signing in ---------------------------------------------------------
+      // Everyone uses their own Claude account, so there's no shared key to hand
+      // out and nothing to paste, and assessments come out of that account's
+      // subscription rather than metered API credits. The login belongs to
+      // Claude Code; this screen is the instructions for it, plus a button that
+      // runs it.
+
+      const INSTALL_CMD = 'npm install -g @anthropic-ai/claude-code';
+      const LOGIN_CMD = 'claude auth login';
+
+      // How long to keep watching for a browser sign-in to land. Long enough to
+      // include creating an account and picking a workspace.
+      const POLL_MS = 1500;
+      const POLL_TRIES = 80;
+
+      let poll = null;
+
+      function stopPolling() {
+        if (poll) clearInterval(poll);
+        poll = null;
+      }
+
+      async function showSetup(notice) {
         view = 'setup';
+        stopPolling();
         renderChips();
         card.classList.remove('hidden');
+        card.innerHTML = headRow('Claude account') + '<div class="panel"><p>Checking…</p></div>';
+        fit();
+
+        auth = (await window.ai.authStatus()) || auth;
+        // Reading the profile takes a moment, and the panel may have been reset
+        // or moved to a new contract in the meantime.
+        if (view !== 'setup') return;
+        paintSetup(notice);
+      }
+
+      function cmdRow(command) {
+        return (
+          '<div class="cmd"><code>' + esc(command) + '</code>' +
+          '<button class="btn quiet copy" data-cmd="' + esc(command) + '">Copy</button></div>'
+        );
+      }
+
+      function paintSetup(notice) {
+        const trouble = notice || auth.error || '';
+        const note = trouble ? '<p class="warn">' + esc(trouble) + '</p>' : '';
+
+        if (auth.signedIn) {
+          const who =
+            'Signed in as <b>' + esc(auth.email || 'your Claude account') + '</b>' +
+            (auth.organization ? ' · ' + esc(auth.organization) : '') +
+            (auth.subscription ? ' · ' + esc(auth.subscription) + ' plan' : '') + '.';
+
+          // Signed in, but pointed at API billing rather than the subscription —
+          // which is the setup that runs out of credits mid-assessment.
+          const billing = auth.console
+            ? '<p class="warn">This login uses Anthropic Console billing, so ' +
+              'assessments draw metered API credits instead of your Claude plan. ' +
+              'Sign out and back in to switch.</p>'
+            : '<p>Assessments run on this Claude plan — no API credits involved.</p>';
+
+          card.innerHTML =
+            headRow('Claude account') +
+            '<div class="panel">' +
+            note +
+            '<div class="who">' + who + '</div>' +
+            billing +
+            '<div class="foot"><span class="grow"></span>' +
+            '<button class="btn danger" id="signout">Sign out</button>' +
+            '<button class="btn" id="done">Done</button>' +
+            '</div></div>';
+
+          wireCopies();
+          const out = document.getElementById('signout');
+          if (out) {
+            out.addEventListener('click', async () => {
+              out.disabled = true;
+              const res = await window.ai.signOut();
+              auth = (await window.ai.authStatus()) || auth;
+              paintSetup(res && res.error ? res.error : '');
+            });
+          }
+          document.getElementById('done').addEventListener('click', reset);
+          fit();
+          return;
+        }
+
+        const install = auth.cli
+          ? ''
+          : '<div class="step">1 · INSTALL CLAUDE CODE</div>' +
+            '<p>Run this in Terminal — it’s what handles the login. ' +
+            '<a id="docs">Other install options</a>.</p>' +
+            cmdRow(INSTALL_CMD);
+
+        const signInStep =
+          '<div class="step">' + (auth.cli ? '' : '2 · ') + 'SIGN IN</div>' +
+          (auth.cli
+            ? '<p>Opens a browser. Sign in with your own Claude account — ' +
+              'assessments come out of your subscription, and this app never ' +
+              'sees a key.</p>' +
+              '<div class="foot" style="padding-top:2px"><span class="grow"></span>' +
+              '<button class="btn quiet" id="recheck">Check again</button>' +
+              '<button class="btn" id="signin">Sign in…</button></div>' +
+              '<p style="margin:11px 0 4px">Or run it yourself:</p>' +
+              cmdRow(LOGIN_CMD)
+            : '<p>Then run this. It opens a browser; sign in with your own ' +
+              'Claude account.</p>' +
+              cmdRow(LOGIN_CMD) +
+              '<div class="foot"><span class="grow"></span>' +
+              '<button class="btn" id="recheck">Check again</button></div>');
+
         card.innerHTML =
-          headRow('Connect Claude') +
+          headRow('Claude account') +
           '<div class="panel">' +
-          '<h2>Paste an Anthropic API key</h2>' +
-          '<p>Assessments run on your own Anthropic account and are billed to it. ' +
-          'Create a key at <a id="console">console.anthropic.com</a>, then paste it here — ' +
-          'it’s encrypted with your keychain and never leaves this Mac except to call the API.</p>' +
-          '<div class="row">' +
-          '<input class="field" id="key" type="password" placeholder="sk-ant-…" spellcheck="false" />' +
-          '<button class="btn" id="savekey" disabled>Connect</button>' +
-          '</div></div>';
+          '<h2>Sign in with your Claude account</h2>' +
+          note +
+          install +
+          signInStep +
+          '</div>';
 
-        const key = document.getElementById('key');
-        const save = document.getElementById('savekey');
+        wireCopies();
 
-        document.getElementById('console').addEventListener('click', () => window.ai.openKeyPage());
-        key.addEventListener('input', () => (save.disabled = !key.value.trim()));
-        key.addEventListener('keydown', (e) => { if (e.key === 'Enter' && key.value.trim()) commit(); });
-        save.addEventListener('click', commit);
+        const docs = document.getElementById('docs');
+        if (docs) docs.addEventListener('click', () => window.ai.openDocs());
 
-        async function commit() {
-          const res = await window.ai.saveKey(key.value);
-          if (res && res.hasKey) reset();
+        document.getElementById('recheck').addEventListener('click', () => showSetup());
+
+        const start = document.getElementById('signin');
+        if (start) {
+          start.addEventListener('click', async () => {
+            start.disabled = true;
+            start.textContent = 'Waiting for browser…';
+            const res = await window.ai.signIn();
+            if (res && res.error) {
+              paintSetup(
+                res.error === 'no-cli'
+                  ? 'The Anthropic CLI has gone missing — install it and try again.'
+                  : res.error
+              );
+              return;
+            }
+            watchForSignIn();
+          });
         }
 
         fit();
-        key.focus();
+      }
+
+      // The CLI does its half in a browser, so the panel finds out by looking.
+      function watchForSignIn() {
+        stopPolling();
+        let tries = 0;
+        poll = setInterval(async () => {
+          tries += 1;
+          if (view !== 'setup') { stopPolling(); return; }
+
+          auth = (await window.ai.authStatus()) || auth;
+          if (auth.signedIn) {
+            stopPolling();
+            reset();
+            return;
+          }
+          if (auth.error || tries >= POLL_TRIES) {
+            stopPolling();
+            paintSetup(auth.error || 'No sign-in came back. Try running the command yourself.');
+          }
+        }, POLL_MS);
+      }
+
+      function wireCopies() {
+        card.querySelectorAll('.copy').forEach((b) => {
+          b.addEventListener('click', () => {
+            navigator.clipboard.writeText(b.dataset.cmd).then(() => {
+              b.textContent = 'Copied';
+              setTimeout(() => (b.textContent = 'Copy'), 1200);
+            });
+          });
+        });
       }
 
       // ---- the assessment editor ---------------------------------------------
@@ -1111,8 +1317,9 @@
       // Opened by the hotkey, the overlay button, or `a` over the document.
       window.ai.onOpen((state) => {
         assessments = (state && state.assessments) || [];
+        if (state && state.auth) auth = state.auth;
         const switched = switchedContract(state && state.contract);
-        if (state && !state.hasKey) { showSetup(); return; }
+        if (!auth.signedIn) { showSetup(); return; }
         if (switched || view === 'setup' || view === 'editor') reset();
         else renderChips();
         fit();

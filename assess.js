@@ -7,63 +7,203 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execFile, spawn } = require('child_process');
 
 let app = null;
-let safeStorage = null;
 let getContractView = () => null; // set by init(); returns a WebContents or null
 
 function init(deps) {
   app = deps.app;
-  safeStorage = deps.safeStorage;
   getContractView = deps.getContractView;
+  retireOldKeyFile();
 }
 
-// ---- the API key -----------------------------------------------------------
-// Encrypted with the OS keychain via safeStorage, so it isn't sitting in
-// config.json next to settings people are meant to open and edit by hand.
+// ---- who's asking ----------------------------------------------------------
+// Each person signs in with their own Claude account, and assessments run
+// against that account's subscription rather than metered API credits. The
+// login belongs to Claude Code — `claude auth login` opens a browser and stores
+// the credential in the login keychain — and the Agent SDK picks it up from
+// there, so nothing in this app ever holds a credential.
+//
+// The CLI is used for the account side only (status, sign in, sign out). The
+// asking itself goes through the Agent SDK's own bundled executable, so a
+// missing `claude` on PATH can't break a signed-in install.
 
-function keyFile() {
-  return path.join(app.getPath('userData'), 'claude-key.enc');
+// Earlier versions kept a pasted API key here. It's dead weight now, and a
+// secret nobody is going to think to clean up by hand.
+function retireOldKeyFile() {
+  try {
+    fs.unlinkSync(path.join(app.getPath('userData'), 'claude-key.enc'));
+  } catch {
+    /* never existed, or already gone */
+  }
 }
 
-function saveKey(plain) {
-  const key = (plain || '').trim();
+// Where the CLI might be. PATH first, because a dev run inherits a real shell
+// environment; the fixed list is for the packaged app, which is launched by
+// Finder with a PATH of little more than /usr/bin.
+function cliCandidates() {
+  const home = os.homedir();
+  const fromPath = (process.env.PATH || '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => path.join(dir, 'claude'));
 
-  if (!key) {
+  return [
+    ...fromPath,
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+    path.join(home, '.claude', 'local', 'claude'),
+    path.join(home, '.local', 'bin', 'claude'),
+  ];
+}
+
+let cliPath = null; // memoised across calls; the CLI doesn't move mid-session
+
+function findCli() {
+  if (cliPath) {
     try {
-      fs.unlinkSync(keyFile());
+      fs.accessSync(cliPath, fs.constants.X_OK);
+      return cliPath;
     } catch {
-      /* already gone */
+      cliPath = null; // uninstalled since we last looked
     }
-    return;
   }
 
-  try {
-    if (safeStorage.isEncryptionAvailable()) {
-      fs.writeFileSync(keyFile(), safeStorage.encryptString(key));
-    } else {
-      // No OS-level encryption (a Linux session with no keyring, usually).
-      // Storing it readable is worse than storing it encrypted, so the file is
-      // owner-only at least.
-      fs.writeFileSync(keyFile(), key, { encoding: 'utf8', mode: 0o600 });
+  const seen = new Set();
+  for (const bin of cliCandidates()) {
+    if (seen.has(bin)) continue;
+    seen.add(bin);
+    try {
+      fs.accessSync(bin, fs.constants.X_OK);
+      cliPath = bin;
+      return bin;
+    } catch {
+      /* not here */
     }
-  } catch {
-    /* the key still works for this run; it just won't survive a restart */
+  }
+  return null;
+}
+
+// Surfaced by authStatus() rather than returned from signIn(), because the
+// failure usually happens after the spawn has already come back fine.
+let signInError = '';
+
+// Which account the last status check saw. A thread carries a document and its
+// answers, and both belong to the account that paid for them — switching
+// accounts mid-panel shouldn't inherit either.
+let lastAccount = null;
+
+// The account label as last seen, so an error about the account can name it
+// rather than leaving people guessing which one the app is using.
+let lastAccountLabel = '';
+
+// `claude auth status` answers in JSON:
+//   { loggedIn, authMethod, apiProvider, email, orgId, orgName, subscriptionType }
+// authMethod is "claude.ai" for a subscription login and "console" for one
+// pointed at API billing, which is the distinction this whole change is about.
+function readAuth(cli) {
+  return new Promise((resolve) => {
+    execFile(cli, ['auth', 'status', '--json'], { timeout: 15000 }, (err, stdout) => {
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        // A CLI too old for `auth status`, or one that answered with prose.
+        resolve(null);
+      }
+    });
+  });
+}
+
+// { signedIn, cli, email, organization, subscription, console, error }
+async function authStatus() {
+  const cli = findCli();
+  const said = cli ? await readAuth(cli) : null;
+
+  const signedIn = !!(said && said.loggedIn);
+  const email = (said && said.email) || '';
+  const organization = (said && said.orgName) || '';
+  const subscription = (said && said.subscriptionType) || '';
+
+  // Signed in, but against API billing rather than a subscription — which is
+  // the case that produced the out-of-credits error this app used to hit.
+  const onConsole = signedIn && said.authMethod === 'console';
+
+  lastAccountLabel = organization || email || '';
+
+  const account = signedIn ? `${email}|${organization}|${said.authMethod}` : null;
+  if (account !== lastAccount) {
+    if (lastAccount !== null) resetThread();
+    lastAccount = account;
+  }
+
+  return {
+    signedIn,
+    cli: !!cli,
+    email,
+    organization,
+    subscription,
+    console: onConsole,
+    error: signInError,
+  };
+}
+
+// `claude auth login` opens a browser and waits on a loopback callback rather
+// than reading the terminal, so it runs headless from here. --claudeai pins it
+// to subscription billing; the console flow is the thing we just moved off.
+async function signIn() {
+  const cli = findCli();
+  if (!cli) return { error: 'no-cli' };
+
+  signInError = '';
+
+  try {
+    const child = spawn(cli, ['auth', 'login', '--claudeai'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+
+    let noise = '';
+    const collect = (buf) => {
+      noise = (noise + buf.toString()).slice(-2000);
+    };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+
+    child.on('error', (err) => {
+      signInError = `Could not run ${cli}: ${(err && err.message) || err}`;
+    });
+    child.on('exit', (code) => {
+      // Zero means the browser round trip finished and the credential is
+      // stored; the panel is polling authStatus() and will see it.
+      if (code === 0) return;
+      signInError =
+        noise.trim().split('\n').slice(-3).join(' ').trim() ||
+        `\`claude auth login\` exited with code ${code}.`;
+    });
+
+    return { started: true };
+  } catch (err) {
+    return { error: (err && err.message) || String(err) };
   }
 }
 
-function loadKey() {
-  try {
-    const raw = fs.readFileSync(keyFile());
-    if (!safeStorage.isEncryptionAvailable()) return raw.toString('utf8');
-    return safeStorage.decryptString(raw);
-  } catch {
-    return null;
-  }
-}
+async function signOut() {
+  const cli = findCli();
+  if (!cli) return { error: 'no-cli' };
 
-function hasKey() {
-  return !!loadKey();
+  return new Promise((resolve) => {
+    execFile(cli, ['auth', 'logout'], { timeout: 20000 }, (err, stdout, stderr) => {
+      resetThread();
+      if (err) {
+        const msg = `${stderr || ''}${stdout || ''}`.trim();
+        resolve({ error: msg || (err.message || 'Sign-out failed.') });
+        return;
+      }
+      resolve({ ok: true });
+    });
+  });
 }
 
 // ---- assessments -----------------------------------------------------------
@@ -334,15 +474,19 @@ async function captureContract() {
 // One thread per contract. Follow-up questions keep the document and the
 // previous answers in context; switching to a different document starts over,
 // as does leaving it alone for ten minutes.
+//
+// The history lives in an Agent SDK session rather than in an array here, so a
+// follow-up resumes by id and carries the document without re-sending it — the
+// contract is the bulk of the prompt, and it used to go over on every turn.
 
 const IDLE_MS = 10 * 60 * 1000;
 
-let conversation = [];
+let sessionId = null; // the Agent SDK session backing the current thread
 let threadTitle = '';
 let idleTimer = null;
 
 function resetThread() {
-  conversation = [];
+  sessionId = null;
   threadTitle = '';
   if (idleTimer) {
     clearTimeout(idleTimer);
@@ -481,19 +625,71 @@ function openingContent(contract, task, attached = []) {
           ? '\n\n[This document was long enough to be cut off at this point. ' +
             'Say so if the answer depends on what came after.]'
           : ''),
-      // The document is the same bytes on every follow-up question, and it's
-      // the bulk of the prompt — worth caching so a conversation about one
-      // contract doesn't re-bill it each turn.
-      cache_control: { type: 'ephemeral' },
     });
   }
 
-  // Attachments sit between the contract and the task: after the cached prefix,
-  // and before the instruction that refers to them.
+  // Attachments sit between the contract and the task: after the document, and
+  // before the instruction that refers to them.
   blocks.push(...attached);
 
   blocks.push({ type: 'text', text: task });
   return blocks;
+}
+
+// The Agent SDK is ESM-only. `require` of ESM works on the Node that Electron
+// ships, but the dynamic import is there for the build where it doesn't.
+let agentSdk = null;
+
+async function loadAgentSdk() {
+  if (agentSdk) return agentSdk;
+  try {
+    agentSdk = require('@anthropic-ai/claude-agent-sdk');
+  } catch {
+    agentSdk = await import('@anthropic-ai/claude-agent-sdk');
+  }
+  return agentSdk;
+}
+
+// The whole point of the Claude login is that assessments come out of the
+// person's subscription. A key left in the environment would quietly send them
+// to metered API billing instead, so it doesn't get passed down.
+function subprocessEnv() {
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  return env;
+}
+
+const LIMIT_NAMES = {
+  five_hour: 'five-hour limit',
+  seven_day: 'weekly limit',
+  seven_day_opus: 'weekly Opus limit',
+  seven_day_sonnet: 'weekly Sonnet limit',
+};
+
+// A subscription that's out of runway for now, as opposed to an account that
+// can't pay at all — worth saying which, and when it comes back.
+function limitMessage(info) {
+  const which = LIMIT_NAMES[info.rateLimitType] || 'usage limit';
+  const when = info.resetsAt
+    ? new Date(info.resetsAt * 1000).toLocaleString('en-US', {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : '';
+  const who = lastAccountLabel ? `${lastAccountLabel}’s` : 'Your';
+
+  if (info.errorCode === 'credits_required') {
+    return (
+      `${who} Claude plan is out of usage and has no credits to fall back on. ` +
+      'Add credits or wait for the limit to reset.'
+    );
+  }
+  return (
+    `${who} Claude ${which} is used up, so this couldn’t run` +
+    (when ? `. It resets ${when}.` : '.')
+  );
 }
 
 // Streams an answer to `sender`, one 'ai:delta' per chunk, then resolves.
@@ -503,27 +699,29 @@ async function ask(
   sender,
   { question = '', instruction = '', fresh = false, attachments = [] }
 ) {
-  const apiKey = loadKey();
-  if (!apiKey) return { error: 'no-key' };
+  const auth = await authStatus();
+  if (!auth.signedIn) return { error: 'no-login' };
 
   const task = [instruction, question && (instruction ? `Also: ${question}` : question)]
     .filter(Boolean)
     .join('\n\n');
   if (!task) return { error: 'empty' };
 
-  let Anthropic;
+  let query;
   try {
-    Anthropic = require('@anthropic-ai/sdk');
+    ({ query } = await loadAgentSdk());
   } catch {
-    return { error: 'The Claude SDK is missing from this build.' };
+    return { error: 'The Claude Agent SDK is missing from this build.' };
   }
-
-  let notice = '';
-  const attached = attachmentBlocks(attachments);
 
   if (fresh) resetThread();
 
-  if (!conversation.length) {
+  const attached = attachmentBlocks(attachments);
+  const resuming = !!sessionId;
+  let notice = '';
+  let content;
+
+  if (!resuming) {
     const contract = await captureContract();
     if (contract.kind === 'none') {
       return {
@@ -537,67 +735,148 @@ async function ask(
     } else if (contract.truncated) {
       notice = 'Document was long; the tail was left off.';
     }
-    conversation.push({
-      role: 'user',
-      content: openingContent(contract, task, attached),
-    });
-  } else if (attached.length) {
-    conversation.push({
-      role: 'user',
-      content: [...attached, { type: 'text', text: task }],
-    });
+    content = openingContent(contract, task, attached);
   } else {
-    conversation.push({ role: 'user', content: task });
+    // Resuming carries the document and the previous answers, so a follow-up is
+    // only the new question.
+    content = attached.length
+      ? [...attached, { type: 'text', text: task }]
+      : [{ type: 'text', text: task }];
   }
 
   touchThread();
 
-  const client = new Anthropic({ apiKey });
+  async function* turn() {
+    yield {
+      type: 'user',
+      parent_tool_use_id: null,
+      message: { role: 'user', content },
+    };
+  }
+
+  let streamed = false;
+  let whole = '';
+  let limit = null;
+  let ranAs = null;
+  let run = null;
 
   try {
-    const stream = client.messages.stream({
-      model: 'claude-opus-5',
-      max_tokens: 32000,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'high' },
-      system: systemPrompt(),
-      messages: conversation,
+    run = query({
+      prompt: turn(),
+      options: {
+        model: 'claude-opus-5',
+        effort: 'high',
+        // Replaces Claude Code's own prompt outright: this is a contract
+        // reviewer, and none of the coding-agent framing applies.
+        systemPrompt: systemPrompt(),
+        // No bash, no file access, nothing. The document arrives in the prompt
+        // and attachments arrive as content blocks, so there is nothing for a
+        // tool to do — and a contract reviewer has no business reading disks.
+        tools: [],
+        // Ignore any CLAUDE.md or settings.json lying around; the answer
+        // shouldn't change based on which folder the app was launched from.
+        settingSources: [],
+        includePartialMessages: true,
+        maxTurns: 1,
+        cwd: app.getPath('userData'),
+        env: subprocessEnv(),
+        // Use the Claude Code the person actually signed in with. Left to
+        // itself the SDK resolves its own native build, which on a machine
+        // that has none means a ~290MB download at the worst possible moment —
+        // the first time someone asks about a contract.
+        ...(cliPath ? { pathToClaudeCodeExecutable: cliPath } : {}),
+        ...(resuming ? { resume: sessionId } : {}),
+      },
     });
 
-    stream.on('text', (delta) => {
-      if (!sender.isDestroyed()) sender.send('ai:delta', delta);
-    });
+    for await (const msg of run) {
+      if (msg.session_id) ranAs = msg.session_id;
 
-    const final = await stream.finalMessage();
-    conversation.push({ role: 'assistant', content: final.content });
-    touchThread();
+      if (msg.type === 'stream_event') {
+        const delta = msg.event && msg.event.delta;
+        if (delta && delta.type === 'text_delta' && delta.text) {
+          streamed = true;
+          if (!sender.isDestroyed()) sender.send('ai:delta', delta.text);
+        }
+        continue;
+      }
 
-    if (final.stop_reason === 'refusal') {
+      if (msg.type === 'assistant') {
+        for (const block of (msg.message && msg.message.content) || []) {
+          if (block.type === 'text') whole += block.text;
+        }
+        continue;
+      }
+
+      // Subscription limits arrive as their own event rather than an error, and
+      // a warning-level one shouldn't derail an answer that's streaming fine.
+      if (msg.type === 'rate_limit_event') {
+        const info = msg.rate_limit_info || {};
+        if (info.status === 'rejected') limit = info;
+        continue;
+      }
+
+      // The result ends the turn. Stop reading here rather than waiting for the
+      // iterator to close on its own — a resumed session holds it open, and the
+      // panel would sit on a finished answer showing its spinner.
+      if (msg.type === 'result') {
+        if (msg.subtype !== 'success') {
+          const why = ((msg.errors || []).join(' ') || '').trim();
+          throw new Error(why || msg.subtype);
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    const msg = (err && err.message) || String(err);
+
+    // A rejected limit is the reason the turn died, not whatever the harness
+    // reported on the way out.
+    if (limit) return { error: limitMessage(limit) };
+
+    if (/not logged in|unauthor|authentication|invalid.*credential/i.test(msg)) {
       return {
-        error:
-          'Claude declined to answer this one. Rephrasing usually clears it.',
+        error: 'no-login',
+        notice: 'That sign-in was rejected or has expired. Sign in again.',
       };
     }
-
-    return { done: true, title: threadTitle, notice };
-  } catch (err) {
-    // A failed turn shouldn't poison the thread with an unanswered question.
-    conversation.pop();
-    const msg = (err && err.message) || String(err);
-    if (err && err.status === 401) {
-      return { error: 'That API key was rejected. Re-enter it to try again.' };
-    }
-    if (err && err.status === 429) {
-      return { error: 'Rate limited by the API. Wait a moment and try again.' };
-    }
+    // The thread is only kept when a turn actually landed, so a failure here
+    // leaves the next question to start over with the document.
     return { error: msg };
+  } finally {
+    // Breaking out of the loop leaves the generator suspended. Closing it hands
+    // back whatever the transport is still holding rather than waiting on the
+    // main process to exit — which, being the app, it never does.
+    try {
+      if (run && run.return) await run.return(undefined);
+    } catch {
+      /* already finished, or nothing to unwind */
+    }
   }
+
+  // Deltas are the normal path; this is the build where partial messages didn't
+  // arrive but the answer did, and the panel would otherwise show nothing.
+  if (!streamed && whole && !sender.isDestroyed()) {
+    sender.send('ai:delta', whole);
+    streamed = true;
+  }
+
+  if (limit) return { error: limitMessage(limit) };
+  if (!streamed) {
+    return { error: 'Claude came back with nothing. Try asking again.' };
+  }
+
+  sessionId = ranAs || sessionId;
+  touchThread();
+
+  return { done: true, title: threadTitle, notice };
 }
 
 module.exports = {
   init,
-  hasKey,
-  saveKey,
+  authStatus,
+  signIn,
+  signOut,
   loadAssessments,
   saveAssessments,
   contractStatus,

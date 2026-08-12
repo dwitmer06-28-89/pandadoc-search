@@ -68,17 +68,32 @@ rather than adapting to the defaults.
 
 The thread resets when you navigate to a different document, and after ten minutes idle.
 
-#### Connecting it
+#### Signing in
 
-The first time you open the panel it asks for an Anthropic API key
-([console.anthropic.com](https://console.anthropic.com/settings/keys)). It's encrypted
-with your login keychain and stored outside `config.json`, so it isn't sitting in the
-file you edit by hand.
+Everyone who uses the app signs in with their own Claude account, and assessments come
+out of **that account's subscription** rather than metered API credits. There's no shared
+key, and the app never holds a credential of its own. The first time you open the panel
+it walks you through two steps:
 
-Note this is an **Anthropic API account**, which is separate from a Claude.ai Pro or Max
-subscription and billed per token — there's no way for a third-party app to bill
-inference to a Claude.ai subscription. Assessments run on your own account, and the
-document text is sent to the Anthropic API to produce them.
+```sh
+npm install -g @anthropic-ai/claude-code   # handles the login
+claude auth login                          # opens a browser
+```
+
+Once Claude Code is installed, the panel's **Sign in…** button runs `claude auth login`
+for you and waits for the browser round trip to finish. The credential lands in your
+login keychain, where the Claude Agent SDK reads it — so nothing is stored by this app.
+**Account** in the panel shows who's signed in, which plan, and can sign them out again.
+
+Assessments run through the Agent SDK with **no tools enabled at all** — no shell, no
+file access — because the document arrives in the prompt and attachments arrive as
+content blocks. It reads contracts and nothing else. Any `ANTHROPIC_API_KEY` in the
+environment is deliberately withheld from the subprocess, so a stray key can't silently
+divert usage to metered API billing. If you sign in with `--console` instead, the panel
+says so and warns that assessments will draw API credits rather than your plan.
+
+Usage counts against your Claude plan's limits. If you hit one, the panel names which
+limit and when it resets. The document text is sent to Anthropic to produce assessments.
 
 #### How the document is read
 

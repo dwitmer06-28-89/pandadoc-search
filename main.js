@@ -12,7 +12,7 @@ const {
   nativeImage,
   nativeTheme,
   dialog,
-  safeStorage,
+  screen,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -158,8 +158,8 @@ function hide() {
 
 function createAIWindow() {
   aiWin = new BrowserWindow({
-    width: 764,
-    height: 260,
+    width: 1192,
+    height: 389,
     useContentSize: true,
     show: false,
     frame: false,
@@ -190,6 +190,27 @@ function createAIWindow() {
   // refreshAIVisibility — and the OS keeps it on top of that window as a child.
   aiWin.on('blur', queueAIVisibility);
   aiWin.on('focus', queueAIVisibility);
+}
+
+// Centre the panel on its display, horizontally and vertically.
+//
+// Called on every resize as well as on open, and that's the point: setContentSize
+// pins the top-left and grows the window downward, so a long answer streaming in
+// would walk the panel down the screen and leave it sitting low. Recentring after
+// each size change is what keeps it put.
+//
+// workArea rather than bounds, so "centred" means centred in the space you can
+// actually see — the menu bar and Dock excluded.
+function centerAI() {
+  if (!aiWin || aiWin.isDestroyed()) return;
+  const [w, h] = aiWin.getSize();
+  const area = screen.getDisplayMatching(aiWin.getBounds()).workArea;
+  aiWin.setBounds({
+    x: Math.round(area.x + (area.width - w) / 2),
+    y: Math.round(area.y + (area.height - h) / 2),
+    width: w,
+    height: h,
+  });
 }
 
 // Whether a loaded contract is on screen. The AI button only exists while this
@@ -321,12 +342,22 @@ function showAI(opts = {}) {
     if (results.isMinimized()) results.restore();
     if (!results.isVisible()) results.show();
   }
-  if (!aiWin.isVisible()) aiWin.center();
+  if (!aiWin.isVisible()) centerAI();
   aiOpen = true;
   aiWin.show();
   aiWin.focus();
+  sendAIState();
+}
+
+// The panel's opening state. Async because working out who's signed in means
+// reading the CLI's profile off disk, so the send lands a tick after the show —
+// the panel is already up and asking for it either way.
+async function sendAIState() {
+  if (!aiWin || aiWin.isDestroyed()) return;
+  const auth = await assess.authStatus();
+  if (!aiWin || aiWin.isDestroyed()) return;
   aiWin.webContents.send('ai:open', {
-    hasKey: assess.hasKey(),
+    auth,
     assessments: assess.loadAssessments(),
     contract: aiDocKey,
   });
@@ -1080,30 +1111,23 @@ ipcMain.on('ai:cancel', () => hideAI());
 ipcMain.on('ai:resize', (_e, height) => {
   if (!aiWin || aiWin.isDestroyed()) return;
   const [w] = aiWin.getContentSize();
-  aiWin.setContentSize(w, Math.max(160, Math.round(height)));
+  aiWin.setContentSize(w, Math.max(239, Math.round(height)));
+  centerAI();
 });
 
 // The panel asks for its own state once loaded, since it may finish loading
 // after the click that opened it.
 ipcMain.on('ai:ready', () => {
-  if (!aiWin || aiWin.isDestroyed()) return;
-  aiWin.webContents.send('ai:open', {
-    hasKey: assess.hasKey(),
-    assessments: assess.loadAssessments(),
-    contract: aiDocKey,
-  });
+  sendAIState();
 });
 
-ipcMain.on('ai:open-key-page', () => {
-  shell.openExternal('https://console.anthropic.com/settings/keys');
+ipcMain.on('ai:open-docs', () => {
+  shell.openExternal('https://code.claude.com/docs/en/quickstart');
 });
 
-ipcMain.handle('ai:save-key', (_e, key) => {
-  assess.saveKey(key);
-  // A new key means a new account — don't carry a half-finished thread over.
-  assess.resetThread();
-  return { hasKey: assess.hasKey() };
-});
+ipcMain.handle('ai:auth-status', () => assess.authStatus());
+ipcMain.handle('ai:sign-in', () => assess.signIn());
+ipcMain.handle('ai:sign-out', () => assess.signOut());
 
 ipcMain.handle('ai:get-assessments', () => assess.loadAssessments());
 ipcMain.handle('ai:save-assessments', (_e, list) => assess.saveAssessments(list));
@@ -1278,7 +1302,6 @@ if (!app.requestSingleInstanceLock()) {
     // that window is closed and reopened.
     assess.init({
       app,
-      safeStorage,
       getContractView: () =>
         resultsView && !resultsView.webContents.isDestroyed()
           ? resultsView.webContents
