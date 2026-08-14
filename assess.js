@@ -431,7 +431,19 @@ const OUTLINE_HELPERS = `
   // copy around them — indistinguishable from a heading by type alone, and the
   // reason an earlier pass came back with one row of a quote. A table cell is a
   // row, not a section.
-  const inTable = (el) => !!el.closest('table, [role="table"], [role="grid"]');
+  //
+  // Scoped to tables that actually tabulate, though. An editor will wrap a lone
+  // heading in a one-cell table to give it a rule or a fill, and that wrapper is
+  // layout — there are no other rows for the heading to be one of. It takes a
+  // second cell before "this is a row, not a section" is true of anything.
+  const inTable = (el) => {
+    const table = el.closest('table, [role="table"], [role="grid"]');
+    if (!table) return false;
+    const cells = table.querySelectorAll(
+      'td, th, [role="cell"], [role="gridcell"], [role="columnheader"]'
+    );
+    return cells.length > 1;
+  };
 
   // The deepest element that holds this exact text: for <div><span>Scope</span>
   // the span is the heading and the div is a wrapper, and asking for leaves
@@ -489,13 +501,36 @@ const HEADINGS_JS = `(() => {
     document.querySelectorAll('h1, [role="heading"][aria-level="1"]')
   ).filter((el) => seen(el) && usable(words(el)) && !inTable(el));
 
-  let found = tagged;
+  // The type-size pass always runs and is always merged in — never skipped
+  // because the tags looked sufficient. A document can tag most of its sections
+  // and still style one by hand, and that one is invisible to a tag-only
+  // outline no matter how large it renders. Gating the pass on "fewer than two
+  // tags" is what dropped a heading sitting in plain sight between two that
+  // made the list.
+  const { out } = candidates();
 
-  // One <h1> is a title, not an outline — the rest of this document's headings
-  // are styled by hand, so the type-size pass runs too and the two are merged.
-  if (tagged.length < 2) {
-    const { out } = candidates();
+  const tiers = new Map();
+  for (const hit of out) {
+    if (!tiers.has(hit.size)) tiers.set(hit.size, []);
+    tiers.get(hit.size).push(hit.el);
+  }
+  const sizes = Array.from(tiers.keys()).sort((a, b) => b - a);
 
+  let picked;
+  if (tagged.length >= 2) {
+    // The document tagged its own outline, so the pass is here for one job:
+    // catch the sections that were styled instead of tagged. It admits nothing
+    // less prominent than the smallest heading the document did tag — below
+    // that line are subheads, and listing those would bury the outline that
+    // already works. Rounded to match the tiers, which are rounded too.
+    const floor =
+      Math.round(
+        Math.min(
+          ...tagged.map((el) => parseFloat(getComputedStyle(el).fontSize) || 0)
+        ) * 2
+      ) / 2;
+    picked = sizes.filter((size) => size >= floor).flatMap((s) => tiers.get(s));
+  } else {
     // Group by size, then take every tier from the largest down to and
     // including the first that occurs more than once.
     //
@@ -504,22 +539,19 @@ const HEADINGS_JS = `(() => {
     // pricing table became the whole list. But the sizes above that level are
     // the document's own H1s, one-offs by nature: a lone "Investment Breakdown"
     // over four section headings is exactly the thing you'd want to jump to.
-    const tiers = new Map();
-    for (const hit of out) {
-      if (!tiers.has(hit.size)) tiers.set(hit.size, []);
-      tiers.get(hit.size).push(hit.el);
-    }
-    const sizes = Array.from(tiers.keys()).sort((a, b) => b - a);
     let depth = sizes.findIndex((size) => tiers.get(size).length >= 2);
     // Nothing repeats — one heading in the whole document, so take it.
     if (depth < 0) depth = 0;
-
-    const picked = sizes.slice(0, depth + 1).flatMap((size) => tiers.get(size));
-    found = tagged.concat(picked.filter((el) => !tagged.includes(el)));
-    found.sort((a, b) =>
-      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
-    );
+    picked = sizes.slice(0, depth + 1).flatMap((size) => tiers.get(size));
   }
+
+  // A tagged heading that wraps a styled one is the same destination twice, but
+  // they're parent and child, so they sort adjacent and the repeat filter below
+  // collapses them.
+  const found = tagged.concat(picked.filter((el) => !tagged.includes(el)));
+  found.sort((a, b) =>
+    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+  );
 
   const items = [];
   for (const el of found) {
