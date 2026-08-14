@@ -192,7 +192,7 @@
       <div id="outline" class="outline"></div>
     </div>
 
-    <button class="jump" id="jump" title="Jump to a section">
+    <button class="jump" id="jump" title="Jump to a section  (P)">
       <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#1f2937" stroke-width="2" stroke-linecap="round">
         <circle cx="4" cy="5" r="1.15" fill="#1f2937" stroke="none" />
         <circle cx="4" cy="10" r="1.15" fill="#1f2937" stroke="none" />
@@ -355,7 +355,13 @@
         window.overlay.size(SHUT_W, SHUT_H);
       }
 
-      jump.addEventListener('click', () => (open ? closePanel() : openPanel()));
+      const toggle = () => (open ? closePanel() : openPanel());
+
+      jump.addEventListener('click', toggle);
+
+      // Bare "p" over the document. The key is pressed in PandaDoc's own frame,
+      // so it arrives from the main process rather than from this page.
+      window.overlay.onJumpToggle(toggle);
 
       // A click on the document is the main process's to notice — this view is
       // over it, so those events never arrive here.

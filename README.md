@@ -40,9 +40,9 @@ Four buttons float over its bottom-right corner:
 - **Sky list** — jump to a section of the document. See below.
 - **Green magnifier** — open the search bar over the window.
 
-Pressing **S** on the page does the same as the green magnifier, and **A** does the same
-as the sparkle — unless a text field has the caret, in which case they just type the
-letter.
+Pressing **S** on the page does the same as the green magnifier, **A** does the same as
+the sparkle, and **P** does the same as the sky list — unless a text field has the
+caret, in which case they just type the letter.
 
 The hotkey gets a first step while that window exists: one press brings the PandaDoc
 window forward (it's usually the results you already wanted, just buried), and a second
@@ -51,8 +51,9 @@ green magnifier is the same thing without the first press.
 
 ### Jumping to a section
 
-The sky list button appears on the same terms as the sparkle: only once a document has
-finished rendering. Clicking it opens the document's outline above the buttons, and
+The sky list button — or **P** over the document — appears on the same terms as the
+sparkle: only once a document has finished rendering. It opens the outline above the
+buttons, and
 clicking a heading scrolls there and flashes it for a moment so you can see where you
 landed. Escape, a click on the document, or the button again closes it.
 

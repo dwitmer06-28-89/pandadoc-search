@@ -765,6 +765,15 @@ function closeJump() {
   resultsOverlay.webContents.send('overlay:jump-close');
 }
 
+// Bare "p" over the document. Gated on the same readiness as the button it
+// stands in for, so the key does nothing rather than opening an empty list on a
+// page that has no document to outline.
+function toggleJump() {
+  if (!aiReady) return;
+  if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
+  resultsOverlay.webContents.send('overlay:jump-toggle');
+}
+
 function sendDarkState() {
   if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
   resultsOverlay.webContents.send('overlay:dark-state', !!config.darkMode);
@@ -961,15 +970,17 @@ function createResultsWindow() {
   view.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
 
-    // Bare "s" over the document is the same as the hotkey, and bare "a" raises
-    // the Claude panel — but only when nothing is being typed into, so they
-    // can't eat a letter. The keys aren't swallowed for the same reason the
-    // arrows aren't: whether they mean anything here is only known once the
-    // editing check comes back.
+    // Bare "s" over the document is the same as the hotkey, "a" raises the
+    // Claude panel, and "p" opens the quick-jump list — but only when nothing is
+    // being typed into, so they can't eat a letter. The keys aren't swallowed
+    // for the same reason the arrows aren't: whether they mean anything here is
+    // only known once the editing check comes back.
     if (!input.meta && !input.control && !input.alt && !input.shift) {
       if (input.key === 's' || input.key === 'S') unlessEditing(show);
       else if (input.key === 'a' || input.key === 'A') {
         unlessEditing(() => showAI({ quiet: true }));
+      } else if (input.key === 'p' || input.key === 'P') {
+        unlessEditing(toggleJump);
       }
       return;
     }

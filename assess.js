@@ -412,49 +412,113 @@ async function contractStatus() {
 // where the document — and the scroll position we want to move — actually is.
 //
 // PandaDoc doesn't promise real <h1> tags: a document built in its editor is
-// often styled divs, so heading tags are tried first and a type-size pass backs
-// them up. Only the top tier is kept either way, which is what "just the H1s"
-// means in a document that never declared a level.
+// usually styled divs, so heading tags are tried first and a type-size pass
+// backs them up — merged rather than one replacing the other, since a document
+// with a single tagged title and the rest styled by hand needs both.
 //
 // Each heading is marked with a data attribute as it's found, so jumping is a
 // lookup by mark rather than by index into a list the page may have re-rendered
 // out from under us. The marks are cleared and rewritten on every open.
-const HEADINGS_JS = `(() => {
-  const MARK = 'data-pds-jump';
-  document.querySelectorAll('[' + MARK + ']')
-    .forEach((el) => el.removeAttribute(MARK));
 
+// Shared by the outline and the survey below, so what gets tuned is what gets
+// listed.
+const OUTLINE_HELPERS = `
   const seen = (el) => el.getClientRects().length > 0;
   const words = (el) => ((el.textContent || '').replace(/\\s+/g, ' ')).trim();
   const usable = (t) => t.length > 1 && t.length <= 120;
 
-  let found = Array.from(
-    document.querySelectorAll('h1, [role="heading"][aria-level="1"]')
-  ).filter((el) => seen(el) && usable(words(el)));
+  // A pricing table's product names are short, bold and bigger than the body
+  // copy around them — indistinguishable from a heading by type alone, and the
+  // reason an earlier pass came back with one row of a quote. A table cell is a
+  // row, not a section.
+  const inTable = (el) => !!el.closest('table, [role="table"], [role="grid"]');
 
-  // Nothing declared a level — fall back to type size. Leaf elements only, so a
-  // wrapper doesn't get counted as the heading it contains, and only the largest
-  // tier survives, which is the document's own H1 equivalent.
-  if (found.length < 2) {
-    const base = parseFloat(getComputedStyle(document.body).fontSize) || 16;
-    const sized = [];
-    for (const el of document.body.querySelectorAll('h1,h2,h3,p,div,span,td')) {
-      if (el.querySelector('*')) continue;
+  // The deepest element that holds this exact text: for <div><span>Scope</span>
+  // the span is the heading and the div is a wrapper, and asking for leaves
+  // instead would throw away any heading with a <b> or a <br> inside it.
+  const deepest = (el) => {
+    const text = words(el);
+    for (const child of el.children) if (words(child) === text) return false;
+    return true;
+  };
+
+  // Body copy's size, taken from whichever element holds the most text rather
+  // than from <body>, whose own font-size is often nothing the document uses.
+  const bodySize = () => {
+    let best = null;
+    let most = 0;
+    for (const el of document.body.querySelectorAll('p, div, span, li, td')) {
+      if (!deepest(el)) continue;
+      const len = words(el).length;
+      if (len > most && len >= 80) {
+        most = len;
+        best = el;
+      }
+    }
+    const from = best || document.body;
+    const size = parseFloat(getComputedStyle(from).fontSize) || 0;
+    return size >= 8 ? size : 16;
+  };
+
+  // Bigger than the body copy, or the same size and set bold.
+  const candidates = () => {
+    const base = bodySize();
+    const out = [];
+    for (const el of document.body.querySelectorAll('*')) {
       const text = words(el);
-      if (!usable(text) || !seen(el)) continue;
+      if (!usable(text) || inTable(el) || !seen(el) || !deepest(el)) continue;
       const cs = getComputedStyle(el);
       const size = parseFloat(cs.fontSize) || 0;
       const weight = parseInt(cs.fontWeight, 10) || 400;
-      if (size >= base * 1.6 || (size >= base * 1.25 && weight >= 600)) {
-        sized.push({ el, size });
+      if (size >= base * 1.35 || (size >= base * 1.05 && weight >= 600)) {
+        // Rounded, so two headings a hair apart still count as one tier.
+        out.push({ el, size: Math.round(size * 2) / 2, weight, text });
       }
     }
-    if (sized.length) {
-      const top = Math.max(...sized.map((s) => s.size));
-      found = sized.filter((s) => s.size >= top - 0.5).map((s) => s.el);
-    } else {
-      found = [];
+    return { base, out };
+  };
+`;
+
+const HEADINGS_JS = `(() => {
+  const MARK = 'data-pds-jump';
+  document.querySelectorAll('[' + MARK + ']')
+    .forEach((el) => el.removeAttribute(MARK));
+  ${OUTLINE_HELPERS}
+
+  const tagged = Array.from(
+    document.querySelectorAll('h1, [role="heading"][aria-level="1"]')
+  ).filter((el) => seen(el) && usable(words(el)) && !inTable(el));
+
+  let found = tagged;
+
+  // One <h1> is a title, not an outline — the rest of this document's headings
+  // are styled by hand, so the type-size pass runs too and the two are merged.
+  if (tagged.length < 2) {
+    const { out } = candidates();
+
+    // Group by size, then take every tier from the largest down to and
+    // including the first that occurs more than once.
+    //
+    // A tier with several members is a level, and a level is what an outline is
+    // made of — following the single biggest line instead is how one row of a
+    // pricing table became the whole list. But the sizes above that level are
+    // the document's own H1s, one-offs by nature: a lone "Investment Breakdown"
+    // over four section headings is exactly the thing you'd want to jump to.
+    const tiers = new Map();
+    for (const hit of out) {
+      if (!tiers.has(hit.size)) tiers.set(hit.size, []);
+      tiers.get(hit.size).push(hit.el);
     }
+    const sizes = Array.from(tiers.keys()).sort((a, b) => b - a);
+    let depth = sizes.findIndex((size) => tiers.get(size).length >= 2);
+    // Nothing repeats — one heading in the whole document, so take it.
+    if (depth < 0) depth = 0;
+
+    const picked = sizes.slice(0, depth + 1).flatMap((size) => tiers.get(size));
+    found = tagged.concat(picked.filter((el) => !tagged.includes(el)));
+    found.sort((a, b) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    );
   }
 
   const items = [];
@@ -465,8 +529,38 @@ const HEADINGS_JS = `(() => {
     if (items.length && items[items.length - 1].text === text) continue;
     el.setAttribute(MARK, String(items.length));
     items.push({ id: items.length, text });
+    // Past this it's body copy being listed as an outline, and no list that
+    // long is quicker than scrolling.
+    if (items.length >= 80) break;
   }
   return items;
+})()`;
+
+// What the outline pass saw, for tuning it against a real document. Printed by
+// documentHeadings() when PDS_DEBUG_OUTLINE=1 — the thresholds above are
+// guesses about somebody else's markup, and this is how they stop being.
+const SURVEY_JS = `(() => {
+  ${OUTLINE_HELPERS}
+  const { base, out } = candidates();
+  const tiers = {};
+  for (const hit of out) {
+    const key = hit.size + 'px/' + hit.weight;
+    if (!tiers[key]) tiers[key] = [];
+    if (tiers[key].length < 6) tiers[key].push(hit.text.slice(0, 60));
+  }
+  return {
+    base,
+    tagged: {
+      h1: document.querySelectorAll('h1').length,
+      h2: document.querySelectorAll('h2').length,
+      h3: document.querySelectorAll('h3').length,
+      aria: document.querySelectorAll('[role="heading"]').length,
+    },
+    counts: Object.fromEntries(
+      Object.entries(tiers).map(([k, v]) => [k, v.length])
+    ),
+    samples: tiers,
+  };
 })()`;
 
 // Fuzzy, because the same section is called different things in different
@@ -530,10 +624,20 @@ async function documentHeadings() {
   if (!doc) return { items: [], pinned: [] };
 
   try {
+    if (process.env.PDS_DEBUG_OUTLINE === '1') {
+      const survey = await doc.executeJavaScript(SURVEY_JS);
+      console.log('[outline] survey', JSON.stringify(survey, null, 2));
+    }
     const items = await doc.executeJavaScript(HEADINGS_JS);
     if (!Array.isArray(items)) return { items: [], pinned: [] };
+    if (process.env.PDS_DEBUG_OUTLINE === '1') {
+      console.log('[outline] items', JSON.stringify(items));
+    }
     return { items, pinned: pinnedJumps(items) };
-  } catch {
+  } catch (err) {
+    if (process.env.PDS_DEBUG_OUTLINE === '1') {
+      console.log('[outline] failed', err && err.message);
+    }
     return { items: [], pinned: [] };
   }
 }

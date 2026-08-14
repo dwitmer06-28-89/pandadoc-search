@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld('overlay', {
   jumpTo: (id) => ipcRenderer.send('overlay:jump-to', id),
   size: (width, height) => ipcRenderer.invoke('overlay:jump-size', { width, height }),
   onJumpClose: (cb) => ipcRenderer.on('overlay:jump-close', cb),
+  onJumpToggle: (cb) => ipcRenderer.on('overlay:jump-toggle', cb),
 });
