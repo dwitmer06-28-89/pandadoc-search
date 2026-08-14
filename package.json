@@ -1,6 +1,6 @@
 {
   "name": "pandadoc-search",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Global-hotkey search bar that opens PandaDoc document search results",
   "author": "Deron Witmer <deron@rooted.software>",
   "license": "MIT",
