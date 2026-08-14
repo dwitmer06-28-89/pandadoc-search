@@ -32,11 +32,12 @@ is no longer on that search, so it does re-run it.
 
 ### Once a results window is open
 
-Three buttons float over its bottom-right corner:
+Four buttons float over its bottom-right corner:
 
 - **Moon / sun** — toggle dark mode on the page you're looking at, no reload. The icon
   shows which mode is on. The choice is saved to `config.json`, so it sticks.
 - **Violet sparkle** — assess the contract on screen with Claude. See below.
+- **Sky list** — jump to a section of the document. See below.
 - **Green magnifier** — open the search bar over the window.
 
 Pressing **S** on the page does the same as the green magnifier, and **A** does the same
@@ -47,6 +48,29 @@ The hotkey gets a first step while that window exists: one press brings the Pand
 window forward (it's usually the results you already wanted, just buried), and a second
 press — now that it has focus — puts the search bar on top of it for a new search. The
 green magnifier is the same thing without the first press.
+
+### Jumping to a section
+
+The sky list button appears on the same terms as the sparkle: only once a document has
+finished rendering. Clicking it opens the document's outline above the buttons, and
+clicking a heading scrolls there and flashes it for a moment so you can see where you
+landed. Escape, a click on the document, or the button again closes it.
+
+The headings are the document's own H1s. A document built in PandaDoc's editor often
+doesn't declare heading levels at all, so if none are found the outline falls back to
+the largest tier of type on the page — the same headings by eye, just not by tag.
+
+Two shortcuts sit above a hairline at the top, when the document has them:
+
+- **Scope** — matches "Scope of Work", "Scope of Services", or a bare "Scope", and
+  deliberately doesn't match "Out of Scope".
+- **Payment Schedule** — matches "Payment Schedule" or "Payment Terms" first, then
+  falls back through "Payments", "Pricing", "Fees", "Investment", and "Costs".
+
+Each shows the document's own wording rather than the generic name, with a small tag
+saying which shortcut it is, so you jump to text you can actually see on the page. They
+also stay in the list below in their real document position — the pair at the top is a
+shortcut, not a substitute, so the outline underneath is still a faithful one.
 
 ### Assessing a contract with Claude
 

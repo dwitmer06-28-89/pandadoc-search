@@ -407,6 +407,175 @@ async function contractStatus() {
   }
 }
 
+// ---- the document outline ---------------------------------------------------
+// The quick-jump list. Same `/e/` frame the text capture reads, since that's
+// where the document — and the scroll position we want to move — actually is.
+//
+// PandaDoc doesn't promise real <h1> tags: a document built in its editor is
+// often styled divs, so heading tags are tried first and a type-size pass backs
+// them up. Only the top tier is kept either way, which is what "just the H1s"
+// means in a document that never declared a level.
+//
+// Each heading is marked with a data attribute as it's found, so jumping is a
+// lookup by mark rather than by index into a list the page may have re-rendered
+// out from under us. The marks are cleared and rewritten on every open.
+const HEADINGS_JS = `(() => {
+  const MARK = 'data-pds-jump';
+  document.querySelectorAll('[' + MARK + ']')
+    .forEach((el) => el.removeAttribute(MARK));
+
+  const seen = (el) => el.getClientRects().length > 0;
+  const words = (el) => ((el.textContent || '').replace(/\\s+/g, ' ')).trim();
+  const usable = (t) => t.length > 1 && t.length <= 120;
+
+  let found = Array.from(
+    document.querySelectorAll('h1, [role="heading"][aria-level="1"]')
+  ).filter((el) => seen(el) && usable(words(el)));
+
+  // Nothing declared a level — fall back to type size. Leaf elements only, so a
+  // wrapper doesn't get counted as the heading it contains, and only the largest
+  // tier survives, which is the document's own H1 equivalent.
+  if (found.length < 2) {
+    const base = parseFloat(getComputedStyle(document.body).fontSize) || 16;
+    const sized = [];
+    for (const el of document.body.querySelectorAll('h1,h2,h3,p,div,span,td')) {
+      if (el.querySelector('*')) continue;
+      const text = words(el);
+      if (!usable(text) || !seen(el)) continue;
+      const cs = getComputedStyle(el);
+      const size = parseFloat(cs.fontSize) || 0;
+      const weight = parseInt(cs.fontWeight, 10) || 400;
+      if (size >= base * 1.6 || (size >= base * 1.25 && weight >= 600)) {
+        sized.push({ el, size });
+      }
+    }
+    if (sized.length) {
+      const top = Math.max(...sized.map((s) => s.size));
+      found = sized.filter((s) => s.size >= top - 0.5).map((s) => s.el);
+    } else {
+      found = [];
+    }
+  }
+
+  const items = [];
+  for (const el of found) {
+    const text = words(el);
+    // A heading repeated back-to-back is a wrapper and its own child, or a
+    // sticky copy of the one above — either way it isn't a second destination.
+    if (items.length && items[items.length - 1].text === text) continue;
+    el.setAttribute(MARK, String(items.length));
+    items.push({ id: items.length, text });
+  }
+  return items;
+})()`;
+
+// Fuzzy, because the same section is called different things in different
+// contracts. Ordered strongest-first: the first pattern that matches anything
+// wins, and among its matches the earliest heading in the document does — a
+// contract that says "Payments" up top and "Payment Schedule" in an annex should
+// pin the one you meant.
+const PINNED = [
+  {
+    tag: 'scope',
+    label: 'Scope',
+    // "Out of Scope" is the opposite of what you asked for, and it's a real
+    // heading in plenty of statements of work.
+    patterns: [/\bscope\s+of\b/i, /\bscope\b/i],
+    reject: /\b(out\s+of|outside|not\s+in|excluded\s+from)\s+scope\b/i,
+  },
+  {
+    tag: 'payment',
+    label: 'Payment Schedule',
+    patterns: [
+      /\bpayment\s+(schedule|terms|milestones)\b/i,
+      /\bpayments?\b/i,
+      /\bpricing\b/i,
+      /\b(fees?|invoicing|invoices?)\b/i,
+      /\binvest(ment)?\b/i,
+      /\b(costs?|compensation)\b/i,
+    ],
+  },
+];
+
+function pinnedJumps(items) {
+  const out = [];
+  for (const want of PINNED) {
+    const eligible = items.filter(
+      (it) => !want.reject || !want.reject.test(it.text)
+    );
+    for (const pattern of want.patterns) {
+      const hit = eligible.find((it) => pattern.test(it.text));
+      if (hit) {
+        out.push({ id: hit.id, text: hit.text, tag: want.tag });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// { items: [{ id, text }], pinned: [{ id, text, tag }] }
+async function documentHeadings() {
+  const wc = getContractView();
+  if (!wc || wc.isDestroyed()) return { items: [], pinned: [] };
+
+  let frames = [];
+  try {
+    frames = wc.mainFrame.framesInSubtree;
+  } catch {
+    return { items: [], pinned: [] };
+  }
+
+  const doc = frames.find(isDocFrame);
+  if (!doc) return { items: [], pinned: [] };
+
+  try {
+    const items = await doc.executeJavaScript(HEADINGS_JS);
+    if (!Array.isArray(items)) return { items: [], pinned: [] };
+    return { items, pinned: pinnedJumps(items) };
+  } catch {
+    return { items: [], pinned: [] };
+  }
+}
+
+// Scrolls the marked heading into view. `block: 'start'` rather than 'center'
+// so the section reads from its title down, and scrollIntoView finds whichever
+// element is actually scrolling — the document's own pane, not the window.
+async function jumpTo(id) {
+  const wc = getContractView();
+  if (!wc || wc.isDestroyed()) return false;
+
+  let frames = [];
+  try {
+    frames = wc.mainFrame.framesInSubtree;
+  } catch {
+    return false;
+  }
+
+  const doc = frames.find(isDocFrame);
+  if (!doc) return false;
+
+  const js = `(() => {
+    const el = document.querySelector('[data-pds-jump="${Number(id)}"]');
+    if (!el) return false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // A beat of highlight, so you can see where you landed in a wall of text
+    // that otherwise looks the same everywhere.
+    const was = el.style.cssText;
+    el.style.transition = 'box-shadow .18s';
+    el.style.boxShadow = '0 0 0 3px rgba(56,189,248,.55)';
+    el.style.borderRadius = '4px';
+    setTimeout(() => { el.style.cssText = was; }, 1100);
+    return true;
+  })()`;
+
+  try {
+    return await doc.executeJavaScript(js);
+  } catch {
+    return false;
+  }
+}
+
 // { kind: 'text' | 'image' | 'none', text?, image?, title, truncated }
 async function captureContract() {
   const wc = getContractView();
@@ -881,6 +1050,8 @@ module.exports = {
   saveAssessments,
   contractStatus,
   contractKey,
+  documentHeadings,
+  jumpTo,
   captureContract,
   resetThread,
   ask,

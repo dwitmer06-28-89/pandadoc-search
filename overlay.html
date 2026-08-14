@@ -56,6 +56,124 @@
       /* The app icon's palette: emerald, matching the send button in the pill. */
       .search { background: #34d399; }
       .search:hover { background: #4ee0aa; }
+
+      /* Sky — a third hue, so navigation isn't mistaken for search (emerald) or
+         for Claude (violet) mid-reach. Gated on the same signal as the AI
+         button: there's no outline to offer until a document has rendered. */
+      .jump { display: none; background: #38bdf8; }
+      .jump.on { display: grid; }
+      .jump:hover { background: #5fcdfb; }
+      .jump.open { background: #7dd8fc; }
+
+      /* ---- the quick-jump list ----
+         Anchored over the buttons rather than in flow with them, so the row
+         stays put as the panel opens above it. The view underneath is grown to
+         match by the main process before any of this is made visible. */
+      .panel {
+        position: absolute;
+        right: 16px;
+        bottom: 62px;
+        width: 264px;
+        display: none;
+        padding: 6px;
+        border-radius: 14px;
+        /* The same slate glass as the dark-mode toggle, so the cluster reads as
+           one control rather than a button and a menu. */
+        background: rgba(31, 41, 55, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow:
+          0 0 0 0.5px rgba(0, 0, 0, 0.22),
+          0 2px 6px rgba(0, 0, 0, 0.12),
+          0 10px 24px rgba(0, 0, 0, 0.22),
+          0 22px 48px rgba(0, 0, 0, 0.26);
+        font: 13px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        color: #e5e7eb;
+      }
+      /* Laid out but unseen, for the measure that decides how big the view has
+         to be. */
+      .panel.measuring { display: block; visibility: hidden; }
+      .panel.open {
+        display: block;
+        animation: rise 0.13s ease-out;
+      }
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(6px) scale(0.97); }
+        to { opacity: 1; transform: none; }
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        height: auto;
+        padding: 7px 8px;
+        border-radius: 8px;
+        background: transparent;
+        box-shadow: none;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+      }
+      .row:hover { background: rgba(255, 255, 255, 0.08); }
+      .row:active { transform: none; background: rgba(255, 255, 255, 0.13); }
+
+      /* The bullet the button's own glyph promises. */
+      .dot {
+        flex: none;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: rgba(148, 163, 184, 0.7);
+      }
+      .pinned .dot { background: #38bdf8; }
+
+      /* One line, always: a heading that wrapped would change the size of the
+         click-swallowing view from document to document. */
+      .label {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      /* Why this row is at the top, given it shows the document's own wording
+         rather than the generic name. */
+      .tag {
+        flex: none;
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: rgba(56, 189, 248, 0.16);
+        color: #7dd3fc;
+        font-size: 10px;
+        letter-spacing: 0.02em;
+      }
+
+      .rule {
+        height: 1px;
+        margin: 5px 6px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      /* The pinned pair stays put while the outline scrolls under it. */
+      .outline {
+        max-height: 214px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .outline::-webkit-scrollbar { width: 8px; }
+      .outline::-webkit-scrollbar-thumb {
+        border: 2px solid transparent;
+        border-radius: 8px;
+        background: rgba(148, 163, 184, 0.35);
+        background-clip: content-box;
+      }
+
+      .empty {
+        padding: 10px 9px;
+        color: #9ca3af;
+      }
     </style>
   </head>
   <body>
@@ -65,6 +183,23 @@
       <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#1f2937" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M10 2.4 11.6 7 16.2 8.6 11.6 10.2 10 14.8 8.4 10.2 3.8 8.6 8.4 7Z" />
         <path d="M15.4 13.4 16 15.1 17.7 15.7 16 16.3 15.4 18 14.8 16.3 13.1 15.7 14.8 15.1Z" />
+      </svg>
+    </button>
+
+    <div class="panel" id="panel">
+      <div id="pinned" class="pinned"></div>
+      <div id="rule" class="rule"></div>
+      <div id="outline" class="outline"></div>
+    </div>
+
+    <button class="jump" id="jump" title="Jump to a section">
+      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#1f2937" stroke-width="2" stroke-linecap="round">
+        <circle cx="4" cy="5" r="1.15" fill="#1f2937" stroke="none" />
+        <circle cx="4" cy="10" r="1.15" fill="#1f2937" stroke="none" />
+        <circle cx="4" cy="15" r="1.15" fill="#1f2937" stroke="none" />
+        <line x1="8" y1="5" x2="16.5" y2="5" />
+        <line x1="8" y1="10" x2="16.5" y2="10" />
+        <line x1="8" y1="15" x2="13.5" y2="15" />
       </svg>
     </button>
 
@@ -101,13 +236,147 @@
 
       // Only offered once a contract is open and finished rendering — see
       // startAIWatch() in main.js.
+      const jump = document.getElementById('jump');
+
       window.overlay.onAIAvailable((_e, available) => {
         ai.classList.toggle('on', !!available);
+        // Same gate for the outline: a document that's gone isn't one you can
+        // still be holding an open list of headings into.
+        jump.classList.toggle('on', !!available);
+        if (!available) closePanel();
       });
 
-      theme.addEventListener('click', () => window.overlay.toggleDark());
-      ai.addEventListener('click', () => window.overlay.ai());
-      document.getElementById('search').addEventListener('click', () => window.overlay.search());
+      // ---- the quick-jump list ----
+      const panel = document.getElementById('panel');
+      const pinned = document.getElementById('pinned');
+      const rule = document.getElementById('rule');
+      const outline = document.getElementById('outline');
+
+      // The button strip's own footprint, and what the view goes back to on
+      // close. Mirrors OVERLAY_W/OVERLAY_H in main.js.
+      const SHUT_W = 208;
+      const SHUT_H = 64;
+
+      let open = false;
+      // An open that's still fetching, so a second click can't start another.
+      let opening = false;
+
+      function row(item, tag) {
+        const el = document.createElement('button');
+        el.className = 'row';
+        el.title = item.text;
+
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+
+        const label = document.createElement('span');
+        label.className = 'label';
+        // textContent, not innerHTML: these strings come off a document that
+        // isn't ours.
+        label.textContent = item.text;
+
+        el.append(dot, label);
+
+        if (tag) {
+          const badge = document.createElement('span');
+          badge.className = 'tag';
+          badge.textContent = tag;
+          el.append(badge);
+        }
+
+        el.addEventListener('click', () => {
+          window.overlay.jumpTo(item.id);
+          closePanel();
+        });
+        return el;
+      }
+
+      function fill(found) {
+        pinned.replaceChildren();
+        outline.replaceChildren();
+
+        // The document's own wording, not the generic label — you jump to text
+        // you can actually see on the page, and the tag says why it's up here.
+        for (const hit of found.pinned) pinned.append(row(hit, hit.tag));
+
+        for (const item of found.items) outline.append(row(item));
+
+        if (!found.items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = found.pinned.length
+            ? 'No other headings found'
+            : 'No headings found in this document';
+          outline.append(empty);
+        }
+
+        // The pair above is a shortcut, not a substitute: the list below stays a
+        // faithful outline, repeats included. The hairline only earns its place
+        // when there's something on both sides of it.
+        rule.style.display = found.pinned.length ? '' : 'none';
+      }
+
+      async function openPanel() {
+        if (open || opening) return;
+        opening = true;
+        try {
+          const found = await window.overlay.headings();
+          fill(found || { items: [], pinned: [] });
+
+          // Laid out but unseen, so the view can be grown to fit before any of
+          // it is on screen — otherwise the first frame is a panel clipped to
+          // the height of the button strip.
+          panel.classList.add('measuring');
+          const box = panel.getBoundingClientRect();
+          panel.classList.remove('measuring');
+
+          // 16px right padding and 62px of button strip below it, from the CSS,
+          // plus room for the shadow to fall off rather than be clipped.
+          await window.overlay.size(
+            Math.max(SHUT_W, Math.ceil(box.width) + 28),
+            Math.ceil(box.height) + 74
+          );
+
+          open = true;
+          panel.classList.add('open');
+          jump.classList.add('open');
+        } finally {
+          opening = false;
+        }
+      }
+
+      function closePanel() {
+        if (!open) return;
+        open = false;
+        panel.classList.remove('open');
+        jump.classList.remove('open');
+        // Back to the buttons' own footprint: while the list is up this view is
+        // eating clicks meant for the document underneath it.
+        window.overlay.size(SHUT_W, SHUT_H);
+      }
+
+      jump.addEventListener('click', () => (open ? closePanel() : openPanel()));
+
+      // A click on the document is the main process's to notice — this view is
+      // over it, so those events never arrive here.
+      window.overlay.onJumpClose(() => closePanel());
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closePanel();
+      });
+
+      theme.addEventListener('click', () => {
+        closePanel();
+        window.overlay.toggleDark();
+      });
+      ai.addEventListener('click', () => {
+        closePanel();
+        window.overlay.ai();
+      });
+      document.getElementById('search').addEventListener('click', () => {
+        closePanel();
+        window.overlay.search();
+      });
 
       window.overlay.ready();
     </script>

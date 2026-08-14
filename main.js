@@ -728,14 +728,42 @@ function pageBackground() {
 }
 
 // ---- the floating controls -------------------------------------------------
-// A dark-mode toggle, an AI button, and a search button, in their own
-// transparent view pinned over the bottom-right of PandaDoc. Small on purpose:
-// the view swallows clicks wherever it sits, so it covers only the corner it
-// needs — the width is three 38px buttons plus the gaps and padding set in
-// overlay.html, and has to grow with them.
+// A dark-mode toggle, an AI button, a quick-jump button, and a search button, in
+// their own transparent view pinned over the bottom-right of PandaDoc. Small on
+// purpose: the view swallows clicks wherever it sits, so it covers only the
+// corner it needs — the width is four 38px buttons plus the gaps and padding set
+// in overlay.html, and has to grow with them.
 
-const OVERLAY_W = 160;
+const OVERLAY_W = 208;
 const OVERLAY_H = 64;
+
+// Except while the quick-jump list is open, when the view has to be as big as
+// the panel it's drawing. overlay.html measures the panel and asks for the size;
+// closing puts it back to the buttons' own footprint, so the dead region over
+// the document lasts exactly as long as the list does. Clamped so a stuck or
+// hostile number can't blanket the window.
+const OVERLAY_MAX_W = 520;
+const OVERLAY_MAX_H = 720;
+
+let overlayW = OVERLAY_W;
+let overlayH = OVERLAY_H;
+
+// createResultsWindow()'s layout(), kept here so a size change can re-run it
+// without a resize event.
+let layoutResults = null;
+
+function setOverlaySize(width, height) {
+  const fit = (n, min, max) =>
+    Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : min;
+  overlayW = fit(width, OVERLAY_W, OVERLAY_MAX_W);
+  overlayH = fit(height, OVERLAY_H, OVERLAY_MAX_H);
+  if (layoutResults) layoutResults();
+}
+
+function closeJump() {
+  if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
+  resultsOverlay.webContents.send('overlay:jump-close');
+}
 
 function sendDarkState() {
   if (!resultsOverlay || resultsOverlay.webContents.isDestroyed()) return;
@@ -840,12 +868,13 @@ function createResultsWindow() {
       height: Math.max(0, height - TOP_STRIP),
     });
     overlay.setBounds({
-      x: Math.max(0, width - OVERLAY_W),
-      y: Math.max(0, height - OVERLAY_H),
-      width: Math.min(width, OVERLAY_W),
-      height: Math.min(height, OVERLAY_H),
+      x: Math.max(0, width - overlayW),
+      y: Math.max(0, height - overlayH),
+      width: Math.min(width, overlayW),
+      height: Math.min(height, overlayH),
     });
   };
+  layoutResults = layout;
   layout();
   win.on('resize', layout);
 
@@ -876,7 +905,12 @@ function createResultsWindow() {
   // PandaDoc's iframes too, and never for clicks on the panel itself — that's a
   // separate window and its events don't reach this view.
   view.webContents.on('input-event', (_e, input) => {
-    if (input.type === 'mouseDown') hideAI();
+    if (input.type !== 'mouseDown') return;
+    hideAI();
+    // Same reasoning for the quick-jump list, and one more: while it's open the
+    // view over it is eating clicks, so a click that lands on the document is
+    // also the clearest sign it should stop.
+    closeJump();
   });
   strip.webContents.on('did-finish-load', () => {
     tellFocus(win.isFocused());
@@ -1048,6 +1082,11 @@ function openInApp(term, url) {
     resultsView = null;
     resultsStrip = null;
     resultsOverlay = null;
+    layoutResults = null;
+    // The next window's overlay starts as the buttons again, whatever the last
+    // one was left showing.
+    overlayW = OVERLAY_W;
+    overlayH = OVERLAY_H;
     currentUrl = null;
     // aiDocKey deliberately survives the window: closing it and opening the same
     // contract again is coming back to that contract, and the thread is keyed on
@@ -1104,6 +1143,18 @@ ipcMain.on('overlay:ai', () => showAI({ quiet: true }));
 // The search button just raises the same pill the hotkey does; the pill is
 // always-on-top, so it lands over the PandaDoc window.
 ipcMain.on('overlay:search', () => show());
+
+// ---- the quick-jump list ----------------------------------------------------
+ipcMain.handle('overlay:jump-headings', () => assess.documentHeadings());
+ipcMain.on('overlay:jump-to', (_e, id) => {
+  if (typeof id === 'number') assess.jumpTo(id);
+});
+// Awaited by the renderer: it holds the list invisible until the view around it
+// is the right size, so the panel can't be seen clipped to the button strip on
+// the way open.
+ipcMain.handle('overlay:jump-size', (_e, size) => {
+  setOverlaySize(size && size.width, size && size.height);
+});
 
 // ---- the Claude panel's channels --------------------------------------------
 ipcMain.on('ai:cancel', () => hideAI());
