@@ -19,6 +19,11 @@ const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const assess = require('./assess');
+const { LANE, DEBUG, AUTO_UPDATE, isolateLaneData } = require('./lane');
+
+// Before anything reads a path or takes the single-instance lock: point the Prod
+// and Release lanes at their own userData directory. Both are keyed off it.
+isolateLaneData();
 
 // config.js holds the shipped defaults (read-only inside the packaged .app).
 // Real settings live in a config.json under userData so each person can edit
@@ -133,9 +138,25 @@ function createWindow() {
 
   // Dismiss when it loses focus, like Spotlight.
   win.on('blur', () => {
+    // With DevTools open, blur is what happens every time you click INTO
+    // DevTools — dismissing there makes them unusable, which would make the
+    // debug lanes pointless.
+    if (DEBUG && win.webContents.isDevToolsOpened()) return;
     hide();
     queueAIVisibility();
   });
+
+  // Debug lanes only (dev + prod). This app is an LSUIElement with no menu bar,
+  // so there is no ⌥⌘I to inherit — without this there is no way to open
+  // DevTools at all, in any lane.
+  if (DEBUG) {
+    win.webContents.on('before-input-event', (_event, input) => {
+      const toggle =
+        input.key === 'F12' ||
+        (input.meta && input.alt && input.key.toLowerCase() === 'i');
+      if (input.type === 'keyDown' && toggle) win.webContents.toggleDevTools();
+    });
+  }
   win.on('focus', queueAIVisibility);
 }
 
@@ -182,6 +203,17 @@ function createAIWindow() {
   });
 
   aiWin.loadFile('ai.html');
+
+  // Same ⌥⌘I as the search pill. This panel is where the streamed answers land,
+  // so it is usually the one you want a console on.
+  if (DEBUG) {
+    aiWin.webContents.on('before-input-event', (_event, input) => {
+      const toggle =
+        input.key === 'F12' ||
+        (input.meta && input.alt && input.key.toLowerCase() === 'i');
+      if (input.type === 'keyDown' && toggle) aiWin.webContents.toggleDevTools();
+    });
+  }
 
   // Unlike the search pill, this one does NOT dismiss on its own blur: an answer
   // is something you read while the contract sits behind it, and having it
@@ -987,6 +1019,15 @@ function createResultsWindow() {
 
     if (!input.meta || input.control || input.alt) return;
 
+    // Cmd+K is what every other app puts a search box behind, so it opens the
+    // bar even from inside a text field — unlike bare "s", which has to wait to
+    // find out whether it was meant as a letter.
+    if (input.key === 'k' || input.key === 'K') {
+      event.preventDefault();
+      show();
+      return;
+    }
+
     // Cmd+[ and Cmd+] mean nothing else, so they act immediately.
     if (input.key === '[' || input.key === ']') {
       event.preventDefault();
@@ -1251,7 +1292,10 @@ ipcMain.on('resize', (_e, height) => {
 let updateState = 'idle';
 
 function setupUpdater() {
-  if (!app.isPackaged) {
+  // AUTO_UPDATE, not `app.isPackaged`: the Prod and Release lanes are packaged
+  // too, and a test lane that updated itself would download the published
+  // release over the build you were trying to test.
+  if (!AUTO_UPDATE) {
     updateState = 'dev';
     return;
   }
@@ -1283,11 +1327,11 @@ function setupUpdater() {
 }
 
 function checkForUpdatesNow() {
-  if (!app.isPackaged) {
+  if (!AUTO_UPDATE) {
     dialog.showMessageBox({
       type: 'info',
-      message: 'Updates are disabled in development',
-      detail: 'Run the installed .app to check for updates.',
+      message: `Updates are disabled in the ${LANE} lane`,
+      detail: 'Only the published app updates itself. Run the installed PandaDoc Search.app to check for updates.',
     });
     return;
   }
@@ -1345,6 +1389,50 @@ function createTray() {
   tray.on('click', show);
 }
 
+// Live reload for the Dev lane. A no-op in a packaged app — dev-reload checks
+// `app.isPackaged` itself — so this call is safe to leave unconditional.
+//
+// The split is what makes it fast: every .html here carries its scripts and
+// styles inline, so a reload is the whole update and it is instant. Only a
+// main-process edit — main.js, assess.js, config.js — pays for a relaunch.
+function startDevReload() {
+  if (LANE !== 'dev') return;
+  try {
+    require('./dev-reload').start({
+      root: __dirname,
+      watch: [
+        'index.html',
+        'ai.html',
+        'overlay.html',
+        'shell.html',
+        'preload.js',
+        'ai-preload.js',
+        'overlay-preload.js',
+        'shell-preload.js',
+        'main.js',
+        'assess.js',
+        'config.js',
+        // lane.js and dev-reload.js are main-process code too. Omitted, an edit
+        // to either appears to do nothing: classify() would relaunch for it, but
+        // the watcher never sees the file.
+        'lane.js',
+        'dev-reload.js',
+        'assets',
+      ],
+      classify: (rel) => {
+        if (rel.endsWith('.html')) return 'reload';
+        if (rel.startsWith('assets')) return 'reload';
+        if (rel.endsWith('preload.js')) return 'reload';
+        if (rel.endsWith('.js')) return 'relaunch';
+        return null;
+      },
+    });
+  } catch (err) {
+    // Never let a dev convenience stop the app from starting.
+    console.log(`[dev] live reload unavailable: ${err.message}`);
+  }
+}
+
 // Single instance: a second launch just pops the search bar.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -1352,7 +1440,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', show);
 
   app.whenReady().then(() => {
+    // Which lane you are looking at, stated once. Three of these can be
+    // installed at the same time and they look identical on screen.
+    console.log(`[lane] ${LANE} (debug ${DEBUG ? 'on' : 'off'}, auto-update ${AUTO_UPDATE ? 'on' : 'off'})`);
     if (app.dock) app.dock.hide();
+    startDevReload();
     loadConfig();
     // Makes prefers-color-scheme report dark (in case PandaDoc ever grows a
     // dark theme of its own) and darkens scrollbars and native form controls.

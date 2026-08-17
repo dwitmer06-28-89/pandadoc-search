@@ -10,16 +10,20 @@
     "url": "https://github.com/dwitmer06-28-89/pandadoc-search.git"
   },
   "scripts": {
+    "dev": "electron .",
     "install-desktop": "bash scripts/install-desktop.sh",
     "start": "electron .",
     "build": "electron-builder --mac",
-    "release": "electron-builder --mac --publish always"
+    "release": "electron-builder --mac --publish always",
+    "test:prod": "bash scripts/install-lane.sh prod",
+    "test:release": "bash scripts/install-lane.sh release"
   },
   "build": {
     "appId": "software.rooted.pandadoc-search",
     "productName": "PandaDoc Search",
     "files": [
       "main.js",
+      "lane.js",
       "preload.js",
       "index.html",
       "overlay-preload.js",
