@@ -31,7 +31,7 @@ Commit **only** the files you have edited or written during this conversation �
    )"
    ```
 
-7. **Confirm commit.** Run `git status` and `git log -1 --stat`. Tell the user clearly that **the commit is done** — report the hash and subject.
+7. **Confirm commit.** Run `git status` and `git log -1 --stat` to verify the commit landed. Then report per **Reporting** below — do NOT narrate the hash, the subject or the file list.
 
 8. **Install the desktop app.** Last, build the packaged Electron app and install it to `~/Applications`:
 
@@ -59,5 +59,17 @@ Commit **only** the files you have edited or written during this conversation �
 - **Never skip hooks** (no `--no-verify`). If a hook fails, fix the underlying issue and create a new commit.
 - **Never commit files that look like they hold secrets** — warn the user instead and ask before proceeding.
 - **Never update git config** or run destructive git commands unless the user explicitly asks.
-- If the user is on `main` / `master` and the repo has a remote, mention it after committing so they're aware — still do not push.
 - **The install step never blocks the commit.** Commit first, install second. If the build fails, the commit still stands — report the failure rather than trying to undo anything.
+
+## Reporting
+
+Report **only** two things. Nothing else — no file tables, no commit hashes, no commit-message rationale, no repo tours, no restating the pre-commit checks, no push/branch status, no summary of what the commits contained, no offers of follow-up work.
+
+1. **Session files that could NOT be committed.** A file you edited this session that a hook, a lock, a conflict, or another session's in-flight state kept out of the commit. Name the file and the one-line reason, so the user knows to come back after that other session finishes. Files you left alone because *you* never edited them are NOT this — those are the normal case and are never worth a word.
+2. **Push back on the commit.** A real concern about what was just committed: a secret-shaped value, a dev-server address, a hook you had to work around, a change you think is wrong. One or two sentences.
+
+If neither applies, your entire response is:
+
+✅ Fully committed
+
+That is the whole reply.
