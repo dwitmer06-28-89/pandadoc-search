@@ -10,7 +10,9 @@ Commit **only** the files you have edited or written during this conversation �
 
    If the user passed an explicit list of files as arguments to `/commit`, use those instead.
 
-2. **Verify and filter.** For each path, check that the file still exists and that `git status --porcelain -- <path>` shows it as modified, added, or untracked. Drop any paths that are clean (the edit may have been reverted) or that no longer exist. If the resulting list is empty, tell the user and stop — do not create an empty commit.
+2. **Verify and filter.** For each path, check that the file still exists and that `git status --porcelain -- <path>` shows it as modified, added, or untracked. Drop any path that is clean or no longer exists — a clean path is already committed (by this session or another one, it makes no difference) and needs nothing from you.
+
+   If the resulting list is empty, do **not** create an empty commit — and do **not** explain the emptiness. The question the user is asking is "are my edits committed?", not "did *you* commit them". Every session file being clean is a yes: report `✅ Fully committed` per **Reporting** and stop. The only exception is a path that is clean because the file is *gone* or the edit was reverted — that is a genuine "could not be committed" case and belongs in the report.
 
 3. **Secret check.** Before staging, scan paths for likely secrets (`.env`, `credentials*`, `*.pem`, `*.key`, tokens in config). If any match, warn the user and ask before proceeding — do not commit them unless they explicitly confirm.
 
@@ -65,7 +67,9 @@ Commit **only** the files you have edited or written during this conversation �
 
 Report **only** two things. Nothing else — no file tables, no commit hashes, no commit-message rationale, no repo tours, no restating the pre-commit checks, no push/branch status, no summary of what the commits contained, no offers of follow-up work.
 
-1. **Session files that could NOT be committed.** A file you edited this session that a hook, a lock, a conflict, or another session's in-flight state kept out of the commit. Name the file and the one-line reason, so the user knows to come back after that other session finishes. Files you left alone because *you* never edited them are NOT this — those are the normal case and are never worth a word.
+1. **Session files that could NOT be committed.** A file you edited this session whose changes are *not in git* — kept out by a hook, a lock, a conflict, or another session's in-flight state, or reverted/deleted out from under you. Name the file and the one-line reason, so the user knows to come back after that other session finishes.
+
+   A file whose changes already landed in an earlier commit — this session's or another's — is committed. It is not a caveat, not a partial success, and not worth a word. Never report which commit a change went into, never distinguish "I committed it" from "it was already committed", and never say you skipped creating an empty commit. All of that is ✅.
 2. **Push back on the commit.** A real concern about what was just committed: a secret-shaped value, a dev-server address, a hook you had to work around, a change you think is wrong. One or two sentences.
 
 If neither applies, your entire response is:
