@@ -1,9 +1,15 @@
 ---
-name: test-prod-desktop
+name: test-prod
+devices: [desktop]
+argument-hint: devices to run on — this project has only `desktop`
 description: Build the PandaDoc Search PROD lane — a bundled, signed desktop build with debug ON — from the current working tree and install it to ~/Applications/PandaDoc Search Prod.app. Use when a change needs checking in a real bundled app rather than the dev shell, or when something works in dev and not once packaged. Leaves the shipped app and the Release lane untouched. Never commits, pushes, tags, or publishes.
 ---
 
 # Install the Prod lane (bundled, debug ON)
+
+**Devices:** this project is desktop-only, so `desktop` is the only accepted
+argument and a bare invocation simply runs it — there is nothing to disambiguate.
+Any other device word is a refusal naming `desktop`, never a near-miss guess.
 
 ```bash
 npm run test:prod
@@ -13,7 +19,7 @@ That is `bash scripts/install-lane.sh prod`. It builds from the working tree,
 signs, installs to `~/Applications/PandaDoc Search Prod.app`, and reads the lane
 back out of the bundle to prove the flag was honoured.
 
-**Reach for `test-dev-desktop` first.** It is instant and it is right for almost
+**Reach for `test-dev` first.** It is instant and it is right for almost
 everything. This lane exists for the questions dev genuinely cannot answer.
 
 ## What only this lane can tell you
@@ -39,7 +45,7 @@ behaves differently, and dev will lie to you about all of it:
 | Debug (⌥⌘I DevTools) | on | **on** | off | off |
 | Auto-updates | no | **no** | no | **yes** |
 | Where | `npm run dev` | `~/Applications/PandaDoc Search Prod.app` | `…​ Release.app` | `…​/PandaDoc Search.app` |
-| Installed by | — | **`/test-prod-desktop`** | `/test-release-desktop` | `npm run release` + the tag workflow |
+| Installed by | — | **`/test-prod`** | `/test-release` | `npm run release` + the tag workflow |
 
 `lane.js` is the whole mechanism. `scripts/install-lane.sh` stamps `lane` into the
 bundle's metadata; `lane.js` reads it back and decides `DEBUG` and `AUTO_UPDATE`.
@@ -88,7 +94,7 @@ Activity Monitor, and the `[lane] prod (debug on, auto-update off)` line logged 
 startup when launched from a terminal.
 
 Note the dev lane is the one exception — it shares the shipped app's identity, so
-it cannot run alongside it. See `test-dev-desktop`.
+it cannot run alongside it. See `test-dev`.
 
 ## 4. Notarization is skipped unless you ask
 

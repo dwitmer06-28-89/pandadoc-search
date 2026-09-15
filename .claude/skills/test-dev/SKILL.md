@@ -1,9 +1,15 @@
 ---
-name: test-dev-desktop
-description: Run PandaDoc Search from the working tree with live reload — no build, no signing, no install. Edit a file and the change is on screen in under a second. Use whenever a change needs looking at, which is nearly always. For a bundled check before shipping use test-prod-desktop (debug on) or test-release-desktop (debug off).
+name: test-dev
+devices: [desktop]
+argument-hint: devices to run on — this project has only `desktop`
+description: Run PandaDoc Search from the working tree with live reload — no build, no signing, no install. Edit a file and the change is on screen in under a second. Use whenever a change needs looking at, which is nearly always. For a bundled check before shipping use test-prod (debug on) or test-release (debug off).
 ---
 
 # Run the Dev lane (live reload)
+
+**Devices:** this project is desktop-only, so `desktop` is the only accepted
+argument and a bare invocation simply runs it — there is nothing to disambiguate.
+Any other device word is a refusal naming `desktop`, never a near-miss guess.
 
 ```bash
 npm run dev
@@ -81,12 +87,12 @@ name the specific thing to check.
 
 If a change genuinely needs bundled behaviour — anything touching
 `app.isPackaged`, auto-updates, notarization, the tray in a signed build, or the
-packaged file layout — say so and move to `test-prod-desktop`. This lane cannot
+packaged file layout — say so and move to `test-prod`. This lane cannot
 tell you about any of them: `app.isPackaged` is `false` here, which is precisely
 why the reload works.
 
 ## What this lane never does
 
 No build, no `dist/`, no signing, no notarizing, no version bump, no commit, no
-push, no tag, no publish. Nothing that reaches a user. `test-release-desktop` is
+push, no tag, no publish. Nothing that reaches a user. `test-release` is
 the pre-ship check; the deploy skill is the thing that ships.

@@ -1,9 +1,15 @@
 ---
-name: test-release-desktop
+name: test-release
+devices: [desktop]
+argument-hint: devices to run on — this project has only `desktop`
 description: Build the PandaDoc Search RELEASE lane — a bundled, signed desktop build with debug OFF — from the current working tree and install it to ~/Applications/PandaDoc Search Release.app. Use to check how something behaves as shipped, to sanity-check before cutting a release, or to rule out a debug-only artifact. Leaves the shipped app and the Prod lane untouched. Never commits, pushes, tags, or publishes.
 ---
 
 # Install the Release lane (bundled, debug OFF)
+
+**Devices:** this project is desktop-only, so `desktop` is the only accepted
+argument and a bare invocation simply runs it — there is nothing to disambiguate.
+Any other device word is a refusal naming `desktop`, never a near-miss guess.
 
 ```bash
 npm run test:release
@@ -39,7 +45,7 @@ before you believe it.
 | Blur suppressed w/ DevTools | yes | yes | **no** | no |
 | Auto-updates | no | no | **no** | yes |
 | Where | `npm run dev` | `…​ Prod.app` | **`…​ Release.app`** | `…​/PandaDoc Search.app` |
-| Installed by | — | `/test-prod-desktop` | **`/test-release-desktop`** | `npm run release` + the tag workflow |
+| Installed by | — | `/test-prod` | **`/test-release`** | `npm run release` + the tag workflow |
 
 **This is not the shipped app.** `~/Applications/PandaDoc Search.app` is what you
 actually use and it auto-updates; installing an unreleased build there by hand is
@@ -60,7 +66,7 @@ anything uncommitted.
 `~/Library/Application Support/pandadoc-search-release`. Starts empty — its own
 `config.json`, its own `recents.json`, its own PandaDoc sign-in. That isolation is
 deliberate; see `isolateLaneData()` in `lane.js` and the note in
-`test-prod-desktop`.
+`test-prod`.
 
 It runs alongside the shipped app and the Prod lane; all three can be open at once.
 They look identical, so name the lane in anything you report.

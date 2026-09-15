@@ -16,7 +16,7 @@
 #      app's config, recents, or PandaDoc session.
 #   2. Its own single-instance lock, so a test lane runs AT THE SAME TIME as the
 #      shipped app. (The dev lane cannot — it shares the real appId. See
-#      test-dev-desktop.)
+#      test-dev desktop.)
 #   3. Its own auto-update identity, and `lane` in the bundle metadata turns
 #      auto-update off outright. A test lane cannot update itself into the
 #      published release mid-test.
