@@ -222,6 +222,24 @@ function createAIWindow() {
   // refreshAIVisibility — and the OS keeps it on top of that window as a child.
   aiWin.on('blur', queueAIVisibility);
   aiWin.on('focus', queueAIVisibility);
+
+  // A drag onto a smaller display doesn't touch the content, so nothing else
+  // asks for a resize — without this, a panel sized for a big screen can sit
+  // there with its footer past the bottom of a smaller one until its content
+  // next changes.
+  aiWin.on('moved', () => {
+    const [w, h] = aiWin.getContentSize();
+    const cap = aiHeightCap();
+    if (h > cap) aiWin.setContentSize(w, cap);
+  });
+}
+
+// The tallest content height that fits aiWin's current display, leaving a
+// margin for its own padding. Shared by the resize handler and the post-drag
+// recheck above, so a window can never end up taller than the screen it's on.
+function aiHeightCap() {
+  const area = screen.getDisplayMatching(aiWin.getBounds()).workArea;
+  return area.height - 40;
 }
 
 // Centre the panel on its display, horizontally and vertically.
@@ -1214,7 +1232,15 @@ ipcMain.on('ai:cancel', () => hideAI());
 ipcMain.on('ai:resize', (_e, height) => {
   if (!aiWin || aiWin.isDestroyed()) return;
   const [w] = aiWin.getContentSize();
-  aiWin.setContentSize(w, Math.max(239, Math.round(height)));
+  // The CSS caps its scrolling regions in vh, which only means anything if the
+  // window itself never grows past the display — otherwise vh chases a window
+  // that's chasing content, and a long list can push the footer (Save/Cancel)
+  // off-screen with nothing able to scroll it back into view. The display cap
+  // has to win even when it falls below the usual 239 floor — a window a
+  // little short of that floor beats one that runs off the bottom of a small
+  // display, which is exactly what applying the floor last used to do.
+  const target = Math.max(239, Math.round(height));
+  aiWin.setContentSize(w, Math.min(aiHeightCap(), target));
   centerAI();
 });
 

@@ -42,7 +42,8 @@ Four buttons float over its bottom-right corner:
 
 Pressing **S** on the page does the same as the green magnifier, **A** does the same as
 the sparkle, and **P** does the same as the sky list — unless a text field has the
-caret, in which case they just type the letter.
+caret, in which case they just type the letter. **Cmd + K** also opens the search bar,
+and works even while you're typing in a field.
 
 The hotkey gets a first step while that window exists: one press brings the PandaDoc
 window forward (it's usually the results you already wanted, just buried), and a second
@@ -134,6 +135,7 @@ to say when a term is absent rather than inferring one.
 
 ### Navigating
 
+- **Cmd + K** — open the search bar over the window
 - **Cmd + [** / **Cmd + ]** — back / forward
 - **Cmd + ←** / **Cmd + →** — the same, unless a text field has the caret, in which
   case they move to the start/end of the line as usual

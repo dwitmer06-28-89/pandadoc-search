@@ -64,6 +64,14 @@
       .jump.on { display: grid; }
       .jump:hover { background: #5fcdfb; }
       .jump.open { background: #7dd8fc; }
+      /* The list can wait on the document to settle (see awaitSettled in
+         assess.js), which can take a few seconds on a contract that just
+         opened — without this, the press looks dead until it suddenly isn't. */
+      .jump.loading { animation: jumpPulse 1s ease-in-out infinite; }
+      @keyframes jumpPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.45; }
+      }
 
       /* ---- the quick-jump list ----
          Anchored over the buttons rather than in flow with them, so the row
@@ -319,6 +327,7 @@
       async function openPanel() {
         if (open || opening) return;
         opening = true;
+        jump.classList.add('loading');
         try {
           const found = await window.overlay.headings();
           fill(found || { items: [], pinned: [] });
@@ -342,6 +351,7 @@
           jump.classList.add('open');
         } finally {
           opening = false;
+          jump.classList.remove('loading');
         }
       }
 

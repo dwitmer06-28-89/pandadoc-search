@@ -355,6 +355,66 @@ function isDocFrame(frame) {
 // and captureContract() falls back to a screenshot for it.
 const READY_CHARS = 200;
 
+// How long the text has to stop changing before the document counts as loaded.
+// PandaDoc streams a long contract in page by page, so `body.innerText` crosses
+// READY_CHARS while most of the sections are still to come — and anything that
+// reads the document off that first crossing (the outline especially) gets the
+// first page or two and calls it the whole thing.
+const SETTLE_MS = 700;
+// Ceiling for the read-time wait below, so a document that never stops changing
+// still answers rather than hanging the panel open on a spinner.
+const SETTLE_WAIT_MS = 4000;
+
+const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+
+// The visible text's length, or null if the frame won't answer.
+async function textLength(doc) {
+  try {
+    const len = await doc.executeJavaScript(
+      '(((document.body && document.body.innerText) || "").trim()).length'
+    );
+    return typeof len === 'number' ? len : null;
+  } catch {
+    return null;
+  }
+}
+
+// Length last seen, and when it last changed — keyed by document, so switching
+// contracts starts the settle over rather than inheriting the old one's calm.
+let settleKey = null;
+let settleLen = -1;
+let settleAt = 0;
+// Sticky: once a document has settled it stays settled until a different one is
+// on screen. Text can still arrive later — scrolling a long contract renders
+// more of it — and re-opening that question would put the button back out and
+// take the panel down with it, mid-read, on a document that plainly did load.
+let settled = false;
+
+// Has the document stopped growing? Called on every poll of the AI watch, which
+// is what gives this its clock: each call notes the length, and it takes
+// SETTLE_MS of the same length in a row before the answer is yes.
+function noteLength(key, len, now) {
+  // A null key means the lookup that produced it failed transiently (a frame
+  // mid-navigation, mid-render) — not that there's no document anymore. Treating
+  // it as a real switch would wipe the sticky flag below on a document that
+  // never stopped being ready, over one bad read.
+  if (key === null) return settled;
+  if (key !== settleKey) {
+    settled = false;
+    settleKey = key;
+    settleLen = len;
+    settleAt = now;
+    return false;
+  }
+  if (len !== settleLen) {
+    settleLen = len;
+    settleAt = now;
+    return settled;
+  }
+  if (now - settleAt >= SETTLE_MS) settled = true;
+  return settled;
+}
+
 // WHICH contract is on screen, as an identity that stays the same across a
 // re-render and differs between documents. The document lives in an
 // `app.pandadoc.com/e/<id>` iframe, so that id is the document itself — the
@@ -397,13 +457,33 @@ async function contractStatus() {
   const doc = frames.find(isDocFrame);
   if (!doc) return { ready: false };
 
-  try {
-    const len = await doc.executeJavaScript(
-      '(((document.body && document.body.innerText) || "").trim()).length'
-    );
-    return { ready: typeof len === 'number' && len >= READY_CHARS };
-  } catch {
-    return { ready: false };
+  const len = await textLength(doc);
+  if (len === null) return { ready: false };
+
+  // Enough text AND done arriving. The button lighting up is the app's promise
+  // that what it reads is the document, so it waits for the document.
+  const still = noteLength(contractKey(), len, Date.now());
+  return { ready: len >= READY_CHARS && still };
+}
+
+// Blocks until the text stops changing, up to SETTLE_WAIT_MS. contractStatus()
+// already settles in the background, so this normally returns on its first look
+// — it's here for the open that beats the poll to a document that just appeared,
+// which is exactly the case that used to come back with half an outline.
+async function awaitSettled(doc) {
+  const key = contractKey();
+  const until = Date.now() + SETTLE_WAIT_MS;
+  for (;;) {
+    // The user may have moved on to a different contract while this was
+    // waiting. contractStatus()'s own poll is now tracking that one — carrying
+    // on here would mean the two alternately reset each other's settle state,
+    // and this document isn't on screen to settle for anyway.
+    if (contractKey() !== key) return;
+    const len = await textLength(doc);
+    if (len === null) return;
+    if (noteLength(key, len, Date.now())) return;
+    if (Date.now() >= until) return;
+    await wait(150);
   }
 }
 
@@ -654,6 +734,8 @@ async function documentHeadings() {
 
   const doc = frames.find(isDocFrame);
   if (!doc) return { items: [], pinned: [] };
+
+  await awaitSettled(doc);
 
   try {
     if (process.env.PDS_DEBUG_OUTLINE === '1') {
