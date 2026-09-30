@@ -120,14 +120,17 @@ Still not yours, even here, and D2 is explicit about it: haptics, real push, the
 and true performance. The simulator cannot show them, so leave them and say why — an honest
 `unverifiable` is worth more than a soft pass, because the manual list then keeps asking for it.
 
-**If the prompt offers no simulator drive but an iOS simulator is booted with this build on it,
-drive it with `idb`.** It is the same surface and the same loop as above — `shot` → find the
+**If the prompt offers no simulator drive but the thread says this work item's build was installed
+on a simulator — or you installed it there yourself from this worktree during this run — drive
+it with `idb`.** A simulator you merely find booted is not that: it may be carrying `main` or
+another worktree's build, and every check it passes would be a false pass. If you cannot tie the
+installed shell to this worktree, the native checks are the operator's. It is the same surface and the same loop as above — `shot` → find the
 control → `tap` → `shot` — and it talks to the **device** through its own companion, never the
 Mac's cursor or focus, so it is not screen control. It lives under `~/.local/bin`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-idb list-targets                                             # pick the Booted UDID
+idb list-targets                                             # the UDID the build went onto, Booted
 xcrun simctl io "$UDID" screenshot "<evidence dir>/<check>.png"   # shot — then Read the file
 idb ui tap --udid "$UDID" <x> <y>                            # device points, origin top-left
 idb ui swipe --udid "$UDID" <x1> <y1> <x2> <y2> --duration 0.3
