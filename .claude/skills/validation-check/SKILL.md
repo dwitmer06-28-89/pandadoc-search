@@ -4,6 +4,9 @@ description: Work a work item's validation run-sheet by actually driving the bui
 
 # /validation-check
 
+> **Run on an agent.** Arguments starting `opus`, `sonnet`, `haiku` or `fable` (optionally then an
+> effort) mean stop here and follow `/Users/deronwitmer/Documents/Code/ProjectGlobals/.claude/shared/run-on-agent.md`.
+
 Open the app that was just built, carry out each check on the run-sheet, and record what you
 found. Tick what you verified. Leave what you could not.
 

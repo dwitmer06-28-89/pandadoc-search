@@ -2,6 +2,9 @@
 description: Commit session edits immediately (no push)
 ---
 
+> **Run on an agent.** Arguments starting `opus`, `sonnet`, `haiku` or `fable` (optionally then an
+> effort) mean stop here and follow `/Users/deronwitmer/Documents/Code/ProjectGlobals/.claude/shared/run-on-agent.md`.
+
 Commit **only** the files you have edited or written during this conversation — nothing else, even if `git status` shows other changes.
 
 ## Steps
