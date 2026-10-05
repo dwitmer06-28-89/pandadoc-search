@@ -1473,6 +1473,8 @@ function startDevReload() {
         'lane.js',
         'dev-reload.js',
         'assets',
+        // The Send Feedback client: re-copied from ProjectGlobals, never edited here.
+        'feedback',
       ],
       classify: (rel) => {
         if (rel.endsWith('.html')) return 'reload';
