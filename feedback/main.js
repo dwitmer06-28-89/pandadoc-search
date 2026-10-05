@@ -166,7 +166,14 @@ function setup(options) {
     }
     reportId = crypto.randomUUID();
     source = String(from);
-    const parent = getParent();
+    // Only a window the person can see makes a parent. A child of a minimized or
+    // hidden window is minimized or hidden with it on macOS, so the form would open
+    // invisibly — Pandadoc Search's results window and Claude Global's popup hide
+    // themselves, and any main window can be minimized when Help is used.
+    const candidate = getParent();
+    const parent = candidate && !candidate.isDestroyed() && candidate.isVisible() && !candidate.isMinimized()
+      ? candidate
+      : null;
     win = new BrowserWindow({
       width: WIDTH,
       height: 560,
@@ -178,7 +185,7 @@ function setup(options) {
       fullscreenable: false,
       title: 'Send Feedback',
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ececec',
-      ...(parent && !parent.isDestroyed() ? { parent } : {}),
+      ...(parent ? { parent } : {}),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
