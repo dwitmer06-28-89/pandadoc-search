@@ -10,6 +10,7 @@
     "url": "https://github.com/dwitmer06-28-89/pandadoc-search.git"
   },
   "scripts": {
+    "postinstall": "node scripts/guard-bare-electron.js",
     "dev": "electron .",
     "install-desktop": "bash scripts/install-desktop.sh",
     "start": "electron .",
