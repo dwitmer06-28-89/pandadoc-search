@@ -19,14 +19,21 @@
  *
  * The path to ProjectGlobals is DERIVED from the main checkout this tree belongs
  * to, so it also works from a git worktree (same reasoning as the
- * require-build-env shim). It FAILS LOUD when it cannot find the
- * implementation: a guard that cannot run must never read as a pass.
+ * require-build-env shim). On macOS it FAILS LOUD when it cannot find the
+ * implementation: a guard that cannot run must never read as a pass. Anywhere
+ * else it exits 0 at once — there is no bundle there to guard.
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
+
+// Only a macOS dev bundle can be opened bare from a Login Item or Finder, and
+// only this Mac has ProjectGlobals beside the repo. A release build on a
+// Windows CI runner (Claude Global, Pandadoc Search) runs this from `npm ci`
+// with no sibling repo at all, and must not fail for a guard it cannot need.
+if (process.platform !== 'darwin') process.exit(0);
 
 /**
  * The main checkout this tree belongs to, or null unless this is a LINKED
