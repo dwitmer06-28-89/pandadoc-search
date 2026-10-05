@@ -1,0 +1,406 @@
+// GENERATED from ProjectGlobals/shared-code/feedback-core.ts by build-core.mjs — DO NOT EDIT.
+// Edit the core, then run `node build-core.mjs` and re-copy this folder into the desktop apps.
+(function () {
+'use strict';
+/**
+ * In-app feedback — the shared core every starred app uses.
+ *
+ * CANONICAL COPY: `ProjectGlobals/shared-code/feedback-core.ts`. Each app carries a
+ * byte-identical copy at `src/lib/feedback/core.ts`; edit this file, then re-copy it to
+ * every app in the same pass (`/audit-standards` hashes them). A local edit is drift.
+ *
+ * What lives here is everything that must behave the SAME in every app — the report's
+ * shape, the path-through-the-app trail, the diagnostic-info preference, the screenshot
+ * downscale, the title and the body Develop files. What does NOT live here is UI: each
+ * app draws the form with its own sheet, buttons and toast, so it looks native to that
+ * app. No React, no DOM-only imports at module scope — Develop's Mac process imports
+ * this file to format the reports it collects.
+ *
+ * Privacy contract (stated to the person on the form and in Settings):
+ *  - The TRAIL records screens and the names of controls tapped. Never anything typed,
+ *    and never the visible text of a list row — a row's text is the person's own
+ *    content (a prayer title, a task name). It is sent with every bug.
+ *  - The LOG is sent with a bug only while diagnostic info is on (the default). Feature
+ *    requests never carry it.
+ */
+
+/** Develop's `FlagColor`, spelled out so this file imports nothing. */
+
+/** One report, exactly as it is stored in the app's own synced `feedback` table. */
+
+                                
+
+                                                                 
+
+                                                                           
+
+/** What the form collects before it becomes a row. */
+
+function emptyDraft(kind               = 'bug')                {
+  return { kind, flag: null, happened: '', expected: '', request: '', currentHandling: '', screenshot: null };
+}
+
+// ── The trail ─────────────────────────────────────────────────────────────────
+
+const TRAIL_MAX = 50;
+const LABEL_MAX = 60;
+let trail              = [];
+let trailInstalled = false;
+
+function pushStep(kind                   , raw        )       {
+  const label = raw.replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX);
+  if (!label) return;
+  const last = trail[trail.length - 1];
+  // A double-tap or a re-render reporting the same screen twice is one step.
+  if (last && last.kind === kind && last.label === label) return;
+  trail.push({ at: new Date().toISOString(), kind, label });
+  if (trail.length > TRAIL_MAX) trail = trail.slice(-TRAIL_MAX);
+}
+
+/** A screen the person is now on — a route, a view, a tab. Call on every change. */
+function recordScreen(name        )       {
+  pushStep('screen', name);
+}
+
+/** A sheet, dialog or panel that opened over the current screen. */
+function recordOpen(name        )       {
+  pushStep('open', name);
+}
+
+/** The trail so far, oldest first. This session only — it is never persisted. */
+function getTrail()              {
+  return trail.slice();
+}
+
+const TAPPABLE =
+  'button, a[href], summary, [role="button"], [role="tab"], [role="menuitem"], [role="switch"], [role="checkbox"], [role="option"]';
+// Inside one of these the visible text is the person's own content, never a control name.
+const CONTENT_ROW = 'li, [role="listitem"], [role="row"], [role="gridcell"], [role="option"], [data-trail-content]';
+const TEXT_LABEL_MAX = 32;
+
+function tapLabel(el         )         {
+  // `data-trail` is a static name an app chose on purpose, so it always wins.
+  const named = el.getAttribute('data-trail');
+  if (named) return named;
+  const role = el.getAttribute('role') || el.tagName.toLowerCase();
+  // Inside a content row even an aria-label is usually built from the row's data
+  // ("Delete prayer for Mom"), so nothing the row says is recorded.
+  if (el.closest(CONTENT_ROW)) return `${role} in a list`;
+  const aria = el.getAttribute('aria-label');
+  if (aria) return aria;
+  if (el.tagName === 'A') {
+    const href = el.getAttribute('href') || '';
+    // The path only — a query string can carry a search the person typed.
+    if (href.startsWith('/')) return `link ${href.split(/[?#]/)[0]}`;
+    // Anything else (`sms:`, `mailto:`, a web page) names a person or a place they
+    // went: record only its kind, never its text or address.
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(href)?.[1]?.toLowerCase();
+    return scheme ? `${scheme} link` : 'link';
+  }
+  const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+  if (text && text.length <= TEXT_LABEL_MAX) return text;
+  return role;
+}
+
+function onTap(e       )       {
+  const target = e.target                  ;
+  const el = target && typeof target.closest === 'function' ? target.closest(TAPPABLE) : null;
+  if (el) pushStep('tap', tapLabel(el));
+}
+
+/**
+ * Start recording taps. Idempotent; call once from the app shell. Screens are NOT
+ * observed here — every app routes differently, so each calls `recordScreen` itself.
+ */
+function installTrail()       {
+  if (trailInstalled || typeof document === 'undefined') return;
+  trailInstalled = true;
+  // Capture phase, so a handler that stops propagation cannot hide the tap.
+  document.addEventListener('click', onTap, { capture: true });
+}
+
+function formatTrail(steps             )         {
+  if (steps.length === 0) return '(no steps recorded)';
+  return steps
+    .map((s) => `${s.at.slice(11, 19)}  ${s.kind.padEnd(6)} ${s.label}`)
+    .join('\n');
+}
+
+// ── A log for apps that have none of their own ────────────────────────────────
+// Driven and Dividends pass their own export; the rest install this.
+
+const LOG_MAX = 300;
+const LOG_ARG_MAX = 500;
+let logLines           = [];
+let logInstalled = false;
+
+function fmtArg(a         )         {
+  if (a instanceof Error) return `${a.name}: ${a.message}${a.stack ? `\n${a.stack}` : ''}`;
+  if (typeof a === 'string') return a;
+  try {
+    return JSON.stringify(a)?.slice(0, LOG_ARG_MAX) ?? String(a);
+  } catch {
+    return String(a);
+  }
+}
+
+function logLine(level        , args           )       {
+  logLines.push(`${new Date().toISOString()} ${level} ${args.map(fmtArg).join(' ')}`);
+  if (logLines.length > LOG_MAX) logLines = logLines.slice(-LOG_MAX);
+}
+
+/** Capture console warnings/errors, uncaught errors and unhandled rejections. Idempotent. */
+function installLogCapture()       {
+  if (logInstalled || typeof window === 'undefined') return;
+  logInstalled = true;
+  for (const level of ['error', 'warn']         ) {
+    const original = console[level].bind(console);
+    console[level] = (...args           ) => {
+      logLine(level.toUpperCase(), args);
+      original(...args);
+    };
+  }
+  window.addEventListener('error', (e) => logLine('UNCAUGHT', [e.error ?? e.message]));
+  window.addEventListener('unhandledrejection', (e) => logLine('REJECTED', [e.reason]));
+  logLine('INFO', [`started ${typeof location !== 'undefined' ? location.pathname : ''}`]);
+}
+
+function exportCapturedLog()         {
+  return logLines.join('\n');
+}
+
+// ── The diagnostic-info preference ────────────────────────────────────────────
+// Device-local on purpose: it is a privacy choice about THIS device's log.
+
+const DIAG_KEY = 'feedback.diagnostics';
+const NOTICE_KEY = 'feedback.noticeSeen';
+const prefListeners = new Set            ();
+
+function readPref(key        )                {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePref(key        , value        )       {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode — the choice holds for this session only */
+  }
+  prefListeners.forEach((l) => l());
+}
+
+/** On unless the person turned it off. */
+function diagnosticsEnabled()          {
+  return readPref(DIAG_KEY) !== 'off';
+}
+
+function setDiagnosticsEnabled(on         )       {
+  writePref(DIAG_KEY, on ? 'on' : 'off');
+}
+
+/** Whether the one-time "diagnostic info is included" notice has been shown. */
+function diagnosticsNoticeSeen()          {
+  return readPref(NOTICE_KEY) === '1';
+}
+
+function markDiagnosticsNoticeSeen()       {
+  writePref(NOTICE_KEY, '1');
+}
+
+/** For `useSyncExternalStore(subscribeFeedbackPrefs, diagnosticsEnabled, () => true)`. */
+function subscribeFeedbackPrefs(listener            )             {
+  prefListeners.add(listener);
+  return () => prefListeners.delete(listener);
+}
+
+const DIAGNOSTICS_SETTING_LABEL = 'Include diagnostic info with bug reports';
+const DIAGNOSTICS_SETTING_HINT =
+  'Sends a record of what the app was doing so a bug can be found. Turn it off and only the screens you visited are sent — bugs may take longer to fix.';
+const DIAGNOSTICS_NOTICE =
+  'Bug reports include diagnostic info about what the app was doing. You can turn this off in Settings.';
+const SENDER_NOTICE = 'Your name and email are sent with the report.';
+
+// ── Opening the form ──────────────────────────────────────────────────────────
+
+const OPEN_EVENT = 'feedback:open';
+
+/** Ask the app's mounted form to open. `source` lands in the trail. */
+function openFeedback(source        )       {
+  if (typeof window === 'undefined') return;
+  recordOpen(`feedback form (${source})`);
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { source } }));
+}
+
+function onOpenFeedback(handler                          )             {
+  if (typeof window === 'undefined') return () => {};
+  const listener = (e       ) => handler(String((e               ).detail?.source ?? ''));
+  window.addEventListener(OPEN_EVENT, listener);
+  return () => window.removeEventListener(OPEN_EVENT, listener);
+}
+
+// ── The screenshot ────────────────────────────────────────────────────────────
+
+const SHOT_MAX_EDGE = 1280;
+const SHOT_QUALITY = 0.72;
+
+/** A picked image file → a downscaled JPEG data URL small enough to sync. */
+async function screenshotFromFile(file      )                  {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise                  ((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('That image could not be read.'));
+      el.src = url;
+    });
+    const scale = Math.min(1, SHOT_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('That image could not be read.');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', SHOT_QUALITY);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** The bytes inside a `data:` URL, for Develop's attachment store. */
+function dataUrlBytes(dataUrl        )                    {
+  const m = /^data:[^;,]+;base64,(.*)$/.exec(dataUrl);
+  if (!m) return null;
+  const bin = atob(m[1]);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// ── Building the report ───────────────────────────────────────────────────────
+
+/** Why the draft cannot be sent yet, or null when it can. */
+function draftProblem(d               )                {
+  if (d.kind === 'bug') {
+    if (!d.happened.trim()) return 'Say what happened.';
+    if (!d.expected.trim()) return 'Say what you expected to happen.';
+  } else if (!d.request.trim()) {
+    return 'Describe your request.';
+  }
+  return null;
+}
+
+const TITLE_MAX = 80;
+
+/** The work item's title: the first line of what happened, or of the request. */
+function titleFor(d                                                      )         {
+  const src = d.kind === 'bug' ? d.happened : d.request;
+  const line = src.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  const prefix = d.kind === 'bug' ? 'Bug: ' : 'Request: ';
+  const room = TITLE_MAX - prefix.length;
+  return prefix + (line.length > room ? `${line.slice(0, room - 1).trimEnd()}…` : line);
+}
+
+/** The newest end of a log is the end that matters; keep the row small enough to sync. */
+const LOG_KEEP = 80_000;
+
+/**
+ * Dexie Cloud moves any string longer than 32,768 characters out of its row into
+ * blob storage, and a blob is readable only by the person who wrote it — never by
+ * Develop's collector, whose API-client token is refused (403). A log and a
+ * screenshot are routinely longer than that, so they are stored as a list of
+ * pieces each under the limit (the addon checks every array item on its own), and
+ * stay inline where the collector can read them.
+ */
+const SYNC_PIECE = 30_000;
+
+function toPieces(s        )           {
+  const out           = [];
+  for (let i = 0; i < s.length; i += SYNC_PIECE) out.push(s.slice(i, i + SYNC_PIECE));
+  return out;
+}
+
+/** A stored `log` or `screenshot` back to one string: pieces, a plain string, or null. */
+function joinPieces(v         )                {
+  if (typeof v === 'string') return v || null;
+  if (Array.isArray(v) && v.length > 0 && v.every((p) => typeof p === 'string')) return v.join('') || null;
+  return null;
+}
+
+function platformName()         {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const ua = navigator.userAgent;
+  if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/iPhone|iPod/.test(ua)) return 'iPhone';
+  if (/Electron/.test(ua)) return 'Mac app';
+  return 'Web';
+}
+
+function buildFeedbackRow(
+  d               ,
+  ctx
+)              {
+  const steps = getTrail();
+  const isBug = d.kind === 'bug';
+  const withDiagnostics = isBug && diagnosticsEnabled();
+  let log                = null;
+  if (withDiagnostics) {
+    const body = (ctx.log ?? '').slice(-LOG_KEEP).trimEnd();
+    log = `${body}${body ? '\n\n' : ''}=== path through the app ===\n${formatTrail(steps)}`;
+  }
+  return {
+    id: ctx.id,
+    createdAt: new Date().toISOString(),
+    app: ctx.app,
+    kind: d.kind,
+    flag: d.flag,
+    title: titleFor(d),
+    happened: isBug ? d.happened.trim() : '',
+    expected: isBug ? d.expected.trim() : '',
+    request: isBug ? '' : d.request.trim(),
+    currentHandling: isBug ? '' : d.currentHandling.trim(),
+    screenshot: d.screenshot ? toPieces(d.screenshot) : null,
+    trail: isBug ? steps : [],
+    log: log === null ? null : toPieces(log),
+    diagnosticsIncluded: withDiagnostics,
+    senderName: ctx.senderName,
+    senderEmail: ctx.senderEmail,
+    platform: platformName(),
+    userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+  };
+}
+
+/**
+ * The work item body Develop files — ticket.md. `screenshotRef` is the attachment
+ * path the screenshot was stored under (`attachments/<name>`), or null.
+ */
+function reportBody(r             , screenshotRef               )         {
+  const who = r.senderName && r.senderEmail ? `${r.senderName} <${r.senderEmail}>` : r.senderEmail || r.senderName || 'unknown sender';
+  const what = r.kind === 'bug' ? 'Bug report' : 'Feature request';
+  const out           = [
+    `**${what}** from ${who} · ${r.app} · ${r.platform} · ${r.createdAt.slice(0, 16).replace('T', ' ')} UTC`,
+    '',
+  ];
+  if (r.kind === 'bug') {
+    out.push('**What happened**', '', r.happened, '', '**What they expected to happen**', '', r.expected, '');
+  } else {
+    out.push('**Request**', '', r.request, '');
+    if (r.currentHandling) out.push('**How the app handles it today**', '', r.currentHandling, '');
+  }
+  if (screenshotRef) out.push(`![screenshot](${screenshotRef})`, '');
+  if (r.kind === 'bug') {
+    out.push('**Path through the app**', '', '```', formatTrail(r.trail), '```', '');
+    const log = joinPieces(r.log);
+    if (log) out.push('**Diagnostic log**', '', '```', log, '```', '');
+    else if (r.diagnosticsIncluded) out.push('_Sent with diagnostic info on, but the log could not be read._', '');
+    else out.push('_Sent with diagnostic info turned off — only the path above is included._', '');
+  }
+  out.push(`<sub>${r.userAgent}</sub>`);
+  return out.join('\n');
+}
+
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, openFeedback, onOpenFeedback, screenshotFromFile, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+})();

@@ -34,6 +34,7 @@
       "ai.html",
       "assess.js",
       "config.js",
+      "feedback/**",
       "assets/**/*",
       "node_modules/darkreader/darkreader.js",
       "node_modules/darkreader/package.json",

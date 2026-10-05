@@ -24,7 +24,9 @@ To have it always running, add it to **System Settings → General → Login Ite
 - **Escape**, or click outside the bar — dismiss
 - Your last three searches appear as chips; click one to re-run it
 - Menu-bar icon → **Assess Contract with Claude**, **Check for Updates…**,
-  **Edit Config…**, **Quit**
+  **Send Feedback…**, **Edit Config…**, **Quit**
+- **Help → Send Feedback…** (or the menu-bar icon) reports a bug or asks for a feature;
+  the report lands in this app's backlog on Deron's Develop board
 
 Clicking the chip for the search that's already on screen just brings the window
 forward instead of reloading it. If you'd clicked through into a document, the window

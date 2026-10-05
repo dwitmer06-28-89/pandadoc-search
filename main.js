@@ -55,6 +55,17 @@ let currentUrl = null; // what that view was last told to load
 let aiDocKey = null; // the contract the thread and the panel's answers are about
 let recents = [];
 
+// "Send Feedback…" — the shared desktop client in ./feedback (a byte-identical
+// copy of ProjectGlobals/shared-code/desktop-feedback; never edit it here). A
+// report goes to the feedback inbox and lands in this app's Develop backlog.
+// No getLog: the app keeps no log of its own (dark-mode.log is an opt-in
+// debug file), so a report carries the path through the form only. The form
+// stays above the PandaDoc window when one is open.
+const feedback = require('./feedback/main.js').setup({
+  app: 'Pandadoc Search',
+  parent: () => (results && !results.isDestroyed() ? results : null),
+});
+
 const MAX_RECENTS = 3;
 
 function recentsFile() {
@@ -1408,11 +1419,29 @@ function createTray() {
       { type: 'separator' },
       { label: `Version ${app.getVersion()}`, enabled: false },
       { label: 'Check for Updates…', click: checkForUpdatesNow },
+      feedback.menuItem('tray menu'),
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
   tray.on('click', show);
+}
+
+// The menu bar, shown while one of the app's windows is in front. Electron's
+// default menu, role for role, except Help: its links to electronjs.org give way
+// to "Send Feedback…". The Edit menu is what gives the feedback form's text
+// fields copy and paste.
+function createAppMenu() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(IS_MAC ? [{ role: 'appMenu' }] : []),
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+      { role: 'help', submenu: [feedback.menuItem('help menu')] },
+    ])
+  );
 }
 
 // Live reload for the Dev lane. A no-op in a packaged app — dev-reload checks
@@ -1491,6 +1520,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createAIWindow();
     createTray();
+    createAppMenu();
     setupUpdater();
 
     if (!globalShortcut.register(config.hotkey, summon)) {

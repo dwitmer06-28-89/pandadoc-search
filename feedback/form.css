@@ -1,0 +1,184 @@
+/* The feedback window — drawn to read as a native macOS panel in light and dark. */
+:root {
+  --bg: #ececec;
+  --fg: rgba(0, 0, 0, 0.85);
+  --fg-2: rgba(0, 0, 0, 0.5);
+  --field: #ffffff;
+  --field-border: rgba(0, 0, 0, 0.14);
+  --track: rgba(0, 0, 0, 0.06);
+  --thumb: #ffffff;
+  --thumb-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --button: #ffffff;
+  --button-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  --accent: #007aff;
+  --ring: rgba(0, 122, 255, 0.45);
+  --red: #ff3b30;
+  --yellow: #ffcc00;
+  --blue: #007aff;
+  --green: #28cd41;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e;
+    --fg: rgba(255, 255, 255, 0.85);
+    --fg-2: rgba(255, 255, 255, 0.55);
+    --field: rgba(255, 255, 255, 0.05);
+    --field-border: rgba(255, 255, 255, 0.12);
+    --track: rgba(255, 255, 255, 0.08);
+    --thumb: #5a5a5e;
+    --thumb-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.4);
+    --button: #5a5a5e;
+    --button-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.4), inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
+    --accent: #0a84ff;
+    --ring: rgba(10, 132, 255, 0.55);
+    --red: #ff453a;
+    --yellow: #ffd60a;
+    --blue: #0a84ff;
+    --green: #32d74b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--bg); }
+
+body {
+  margin: 0;
+  padding: 18px 20px 20px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.38 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+[hidden] { display: none !important; }
+
+.row { display: flex; justify-content: center; margin-bottom: 14px; }
+
+.field { display: block; margin: 0 0 12px; }
+
+.label { display: block; margin-bottom: 5px; font-weight: 500; }
+.optional { font-weight: 400; color: var(--fg-2); }
+
+/* The segmented control (NSSegmentedControl). */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 7px;
+  background: var(--track);
+}
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 64px;
+  height: 22px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: default;
+}
+.segmented button[aria-checked="true"] { background: var(--thumb); box-shadow: var(--thumb-shadow); }
+.segmented button:focus-visible { outline: 3px solid var(--ring); outline-offset: 0; }
+.flags { display: flex; }
+.flags button { flex: 1; min-width: 0; }
+
+.flag { width: 13px; height: 13px; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.flag.none { fill: none; stroke: var(--fg-2); }
+.flag.blue { fill: var(--blue); stroke: var(--blue); }
+.flag.yellow { fill: var(--yellow); stroke: var(--yellow); }
+.flag.red { fill: var(--red); stroke: var(--red); }
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  padding: 5px 7px;
+  border: 0.5px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+textarea:focus { outline: 3.5px solid var(--ring); outline-offset: 0; border-color: transparent; }
+
+/* Push buttons (NSButton, rounded bezel). */
+.push {
+  height: 24px;
+  min-width: 76px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--button);
+  box-shadow: var(--button-shadow);
+  color: var(--fg);
+  font: inherit;
+  cursor: default;
+}
+.push:active:not(:disabled) { filter: brightness(0.92); }
+.push:focus-visible { outline: 3px solid var(--ring); outline-offset: 1px; }
+.push.default { background: var(--accent); color: #fff; box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.25); }
+.push:disabled { opacity: 0.45; }
+
+.thumb { position: relative; display: inline-block; }
+.thumb img {
+  display: block;
+  max-width: 160px;
+  max-height: 100px;
+  border-radius: 6px;
+  border: 0.5px solid var(--field-border);
+}
+.remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--button);
+  box-shadow: var(--button-shadow);
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+.remove svg { width: 11px; height: 11px; stroke: var(--fg); stroke-width: 1.8; stroke-linecap: round; }
+.remove:focus-visible { outline: 3px solid var(--ring); }
+
+.check { display: flex; gap: 7px; align-items: flex-start; margin: 2px 0 12px; }
+.check input { margin: 2px 0 0; accent-color: var(--accent); }
+.hint { display: block; margin-top: 2px; font-size: 11px; color: var(--fg-2); }
+
+.notice { margin: 0 0 10px; font-size: 11px; color: var(--fg-2); }
+.sender { color: var(--fg); opacity: 0.7; }
+
+.error { margin: 0 0 10px; font-size: 12px; color: var(--red); -webkit-user-select: text; user-select: text; }
+
+.actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 6px; }
+
+.sent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 240px;
+  font-size: 15px;
+  font-weight: 500;
+}
+.sent p { margin: 0; }
+.sent svg { width: 48px; height: 48px; fill: none; stroke: var(--green); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }

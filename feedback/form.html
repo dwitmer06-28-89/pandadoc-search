@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- No network from this window: main.js posts the report. blob: is the core's screenshot downscale. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:">
+  <meta name="color-scheme" content="light dark">
+  <title>Send Feedback</title>
+  <link rel="stylesheet" href="form.css">
+</head>
+<body>
+  <form id="form" novalidate>
+    <div class="row">
+      <div class="segmented" role="radiogroup" aria-label="Type" id="kind">
+        <button type="button" role="radio" data-value="bug" aria-checked="true">Bug</button>
+        <button type="button" role="radio" data-value="feature" aria-checked="false">Feature request</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label" id="flag-label">Criticality</span>
+      <div class="segmented flags" role="radiogroup" aria-labelledby="flag-label" id="flag">
+        <button type="button" role="radio" data-value="" aria-checked="true"><svg class="flag none" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 14.5V2M3.5 2.5h8.2l-1.8 3.2 1.8 3.3H3.5"/></svg>None</button>
+        <button type="button" role="radio" data-value="blue" aria-checked="false"><svg class="flag blue" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 14.5V2M3.5 2.5h8.2l-1.8 3.2 1.8 3.3H3.5z"/></svg>Blue</button>
+        <button type="button" role="radio" data-value="yellow" aria-checked="false"><svg class="flag yellow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 14.5V2M3.5 2.5h8.2l-1.8 3.2 1.8 3.3H3.5z"/></svg>Yellow</button>
+        <button type="button" role="radio" data-value="red" aria-checked="false"><svg class="flag red" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 14.5V2M3.5 2.5h8.2l-1.8 3.2 1.8 3.3H3.5z"/></svg>Red</button>
+      </div>
+    </div>
+
+    <div id="bug-fields">
+      <label class="field">
+        <span class="label">What happened</span>
+        <textarea id="happened" rows="3" required></textarea>
+      </label>
+      <label class="field">
+        <span class="label">What did you expect to happen</span>
+        <textarea id="expected" rows="3" required></textarea>
+      </label>
+    </div>
+
+    <div id="feature-fields" hidden>
+      <label class="field">
+        <span class="label">Your request</span>
+        <textarea id="request" rows="4" required></textarea>
+      </label>
+      <label class="field">
+        <span class="label">How does the app handle this today? <span class="optional">(optional)</span></span>
+        <textarea id="currentHandling" rows="3"></textarea>
+      </label>
+    </div>
+
+    <div class="field">
+      <span class="label">Screenshot <span class="optional">(optional)</span></span>
+      <div id="shot-empty">
+        <button type="button" class="push" id="shot-add">Add Screenshot…</button>
+        <input type="file" id="shot-file" accept="image/*" hidden>
+      </div>
+      <div id="shot-full" class="thumb" hidden>
+        <img id="shot-img" alt="Screenshot to send">
+        <button type="button" class="remove" id="shot-remove" aria-label="Remove screenshot">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5l6 6M11 5l-6 6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <label class="check" id="diag" hidden>
+      <input type="checkbox" id="diag-box" checked>
+      <span>
+        <span id="diag-label"></span>
+        <span class="hint" id="diag-hint"></span>
+      </span>
+    </label>
+
+    <p class="notice"><span id="notice"></span> <span id="sender" class="sender"></span></p>
+    <p class="error" id="error" role="alert" hidden></p>
+
+    <div class="actions">
+      <button type="button" class="push" id="cancel">Cancel</button>
+      <button type="submit" class="push default" id="send" disabled>Send</button>
+    </div>
+  </form>
+
+  <div id="sent" class="sent" hidden role="status">
+    <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="M14.5 24.5l6.5 6.5 13-14"/></svg>
+    <p>Thanks, sent</p>
+  </div>
+
+  <script src="feedback-core.browser.js"></script>
+  <script src="form.js"></script>
+</body>
+</html>
