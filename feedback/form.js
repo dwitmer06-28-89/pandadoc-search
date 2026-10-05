@@ -17,6 +17,8 @@
   let ctx = null;
   // Set before the first await of a send, so a second click or Cmd-Return cannot post twice.
   let sending = false;
+  // Set while a screenshot is read, so a double click on Add or Paste adds it once.
+  let readingShots = false;
 
   const fields = ['summary', 'detail'];
   const send = $('send');
@@ -37,6 +39,8 @@
     const n = draft.screenshots.length;
     $('shot-empty').hidden = n >= core.SCREENSHOTS_MAX;
     $('shot-add').textContent = n ? 'Add Another…' : 'Add Screenshot…';
+    $('shot-add').disabled = readingShots;
+    $('shot-paste').disabled = readingShots;
     $('shot-hint').textContent = n ? `(${n} of ${core.SCREENSHOTS_MAX})` : '(optional)';
   }
 
@@ -83,6 +87,8 @@
   // Picked, pasted with Cmd-V, or read by the Paste button — one path for all three.
   async function addShots(read) {
     showError('');
+    readingShots = true;
+    sync();
     try {
       const urls = await read();
       if (!urls.length) throw new Error(core.NO_CLIPBOARD_IMAGE);
@@ -95,6 +101,8 @@
       if (overflow) showError(overflow);
     } catch (err) {
       showError(err instanceof Error ? err.message : 'That image could not be read.');
+    } finally {
+      readingShots = false;
     }
     sync();
   }
@@ -111,6 +119,7 @@
         remove.addEventListener('click', () => {
           draft.screenshots = core.withoutScreenshot(draft, i).screenshots;
           drawShots();
+          if ($('error').textContent === core.TOO_MANY_SCREENSHOTS) showError('');
           sync();
           $('shot-add').focus();
         });

@@ -306,9 +306,24 @@ async function screenshotFromFile(file      )                  {
 const NO_CLIPBOARD_IMAGE = 'There is no image on the clipboard. Copy a screenshot first.';
 const CLIPBOARD_UNREADABLE = 'The clipboard could not be read. Copy the screenshot again, then paste.';
 
-/** Picked (or ⌘V-pasted) image files → downscaled data URLs, in order. */
-function screenshotsFromFiles(files                                    )                    {
-  return Promise.all(Array.from(files ?? []).map((f) => screenshotFromFile(f)));
+/**
+ * Picked (or ⌘V-pasted) image files → downscaled data URLs, in order. One at a time,
+ * so picking a dozen photos on a phone never holds a dozen full-size decodes at once,
+ * and a file that cannot be read is skipped rather than sinking the rest. Throws only
+ * when none could be read.
+ */
+async function screenshotsFromFiles(files                                    )                    {
+  const out           = [];
+  let firstError          = null;
+  for (const f of Array.from(files ?? [])) {
+    try {
+      out.push(await screenshotFromFile(f));
+    } catch (err) {
+      firstError ??= err;
+    }
+  }
+  if (out.length === 0 && firstError) throw firstError;
+  return out;
 }
 
 /**
@@ -355,6 +370,9 @@ function imageFromPaste(e                )              {
 function onPastedImage(handler                       )             {
   if (typeof document === 'undefined') return () => {};
   const listener = (e                ) => {
+    // Something focused already took this paste (a notes editor left focused under
+    // a phone sheet); adding it here too would put one image in two places.
+    if (e.defaultPrevented) return;
     const image = imageFromPaste(e);
     if (!image) return;
     e.preventDefault();
