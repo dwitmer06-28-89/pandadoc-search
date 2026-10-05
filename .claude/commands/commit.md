@@ -1,5 +1,5 @@
 ---
-description: Commit session edits immediately (no push)
+description: Commit session edits immediately, then push
 ---
 
 > **Run on an agent.** Arguments starting `opus`, `sonnet`, `haiku` or `fable` (optionally then an
@@ -38,7 +38,9 @@ Commit **only** the files you have edited or written during this conversation �
 
 7. **Confirm commit.** Run `git status` and `git log -1 --stat` to verify the commit landed. Then report per **Reporting** below — do NOT narrate the hash, the subject or the file list.
 
-8. **Install the desktop app.** Last, build the packaged Electron app and install it to `~/Applications`:
+8. **Push.** Right after the commit is confirmed — before any install step — push it. Committing and pushing are one act: nothing in these repos builds or deploys from a push (every deploy is its own explicit command), so a push costs nothing and needs no permission. Run `git push`; if the branch has no upstream yet but `origin` exists, `git push -u origin HEAD`. If the push is rejected because the remote moved on, run `git pull --no-rebase --no-edit` once and push again — if that pull refuses or conflicts (`git merge --abort` on a conflict), stop and report it. A repo with no remote has nothing to push to: skip silently. Never force-push.
+
+9. **Install the desktop app.** Last, build the packaged Electron app and install it to `~/Applications`:
 
    ```bash
    npm run install-desktop
@@ -58,7 +60,7 @@ Commit **only** the files you have edited or written during this conversation �
 
 ## Hard rules
 
-- **Never push.** This command is local-only. Do not run `git push` even if the branch tracks a remote.
+- **Always push after committing** (step 8). A commit that stays on this Mac is unfinished work — `/commit`, `/code-review`, a lane agent and Deron typing it himself all end with the work on GitHub. Do not mention a successful push; a push that failed IS pushback — report it under **Reporting** and leave the commit standing.
 - **Never amend.** Always create a new commit.
 - **Never use `git add -A` / `git add .` / `git add -u`.** Stage files individually by path.
 - **Never skip hooks** (no `--no-verify`). If a hook fails, fix the underlying issue and create a new commit.
