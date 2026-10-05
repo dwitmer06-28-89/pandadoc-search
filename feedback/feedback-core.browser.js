@@ -11,7 +11,7 @@
  *
  * What lives here is everything that must behave the SAME in every app — the report's
  * shape, the path-through-the-app trail, the diagnostic-info preference, the screenshot
- * downscale, the title and the body Develop files. What does NOT live here is UI: each
+ * downscale and clipboard paste, the title and the body Develop files. What does NOT live here is UI: each
  * app draws the form with its own sheet, buttons and toast, so it looks native to that
  * app. No React, no DOM-only imports at module scope — Develop's Mac process imports
  * this file to format the reports it collects.
@@ -32,12 +32,16 @@
 
                                                                  
 
-                                                                           
+                                                                                  
 
-/** What the form collects before it becomes a row. */
+/**
+ * What the form collects before it becomes a row. The two text boxes belong to the
+ * form, not to the type: switching Bug ↔ Feature request relabels them and keeps
+ * what was typed. `buildFeedbackRow` files them under the type that is sent.
+ */
 
 function emptyDraft(kind               = 'bug')                {
-  return { kind, flag: null, happened: '', expected: '', request: '', currentHandling: '', screenshot: null };
+  return { kind, flag: null, summary: '', detail: '', screenshots: [] };
 }
 
 // ── The trail ─────────────────────────────────────────────────────────────────
@@ -247,7 +251,36 @@ function onOpenFeedback(handler                          )             {
 const SHOT_MAX_EDGE = 1280;
 const SHOT_QUALITY = 0.72;
 
-/** A picked image file → a downscaled JPEG data URL small enough to sync. */
+/** How many screenshots one report carries. The form stops offering more at this. */
+const SCREENSHOTS_MAX = 5;
+
+const TOO_MANY_SCREENSHOTS = `Only ${SCREENSHOTS_MAX} screenshots fit in one report — the rest were left out.`;
+
+/** What to say after adding `adding` screenshots to a draft holding `holding`: null, or `TOO_MANY_SCREENSHOTS`. */
+function screenshotOverflow(holding        , adding        )                {
+  return holding + adding > SCREENSHOTS_MAX ? TOO_MANY_SCREENSHOTS : null;
+}
+
+/** The draft with one more screenshot, unless it already has `SCREENSHOTS_MAX`. */
+function withScreenshot(d               , shot        )                {
+  return d.screenshots.length >= SCREENSHOTS_MAX ? d : { ...d, screenshots: [...d.screenshots, shot] };
+}
+
+/** The draft without the screenshot at `index`. */
+function withoutScreenshot(d               , index        )                {
+  return { ...d, screenshots: d.screenshots.filter((_, i) => i !== index) };
+}
+
+/**
+ * A row's stored `screenshot` back to its data URLs. They are stored end to end;
+ * each begins `data:image/`, which base64 can never contain, so the split is exact.
+ */
+function screenshotsOf(v         )           {
+  const all = joinPieces(v);
+  return all ? all.split(/(?=data:image\/)/).filter(Boolean) : [];
+}
+
+/** A picked or pasted image → a downscaled JPEG data URL small enough to sync. */
 async function screenshotFromFile(file      )                  {
   const url = URL.createObjectURL(file);
   try {
@@ -270,6 +303,67 @@ async function screenshotFromFile(file      )                  {
   }
 }
 
+const NO_CLIPBOARD_IMAGE = 'There is no image on the clipboard. Copy a screenshot first.';
+const CLIPBOARD_UNREADABLE = 'The clipboard could not be read. Copy the screenshot again, then paste.';
+
+/** Picked (or ⌘V-pasted) image files → downscaled data URLs, in order. */
+function screenshotsFromFiles(files                                    )                    {
+  return Promise.all(Array.from(files ?? []).map((f) => screenshotFromFile(f)));
+}
+
+/**
+ * The form's Paste button: every image on the system clipboard, downscaled — or []
+ * when it holds none (say `NO_CLIPBOARD_IMAGE`). Call it straight from the tap: iOS
+ * only lets a page read the clipboard inside a gesture, and asks the person to
+ * confirm with its own Paste callout.
+ */
+async function screenshotsFromClipboard()                    {
+  const clip = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (!clip || typeof clip.read !== 'function') throw new Error(CLIPBOARD_UNREADABLE);
+  let items                ;
+  try {
+    items = await clip.read();
+  } catch {
+    // Refused, or the person dismissed iOS's Paste callout.
+    throw new Error(CLIPBOARD_UNREADABLE);
+  }
+  const images         = [];
+  for (const item of items) {
+    const type = item.types.find((t) => t.startsWith('image/'));
+    if (type) images.push(await item.getType(type));
+  }
+  return screenshotsFromFiles(images);
+}
+
+/** The image a paste carries, or null. A paste into a text box that carries text stays text. */
+function imageFromPaste(e                )              {
+  const data = e.clipboardData;
+  if (!data) return null;
+  const target = e.target                  ;
+  const intoText = !!target && typeof target.closest === 'function' && !!target.closest('textarea, input, [contenteditable]');
+  if (intoText && data.getData('text/plain')) return null;
+  for (const item of Array.from(data.items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) return item.getAsFile();
+  }
+  return null;
+}
+
+/**
+ * ⌘V / Ctrl-V anywhere while the form is open: an image on the clipboard is added as a
+ * screenshot. Subscribe while the form is mounted; returns the unsubscribe.
+ */
+function onPastedImage(handler                       )             {
+  if (typeof document === 'undefined') return () => {};
+  const listener = (e                ) => {
+    const image = imageFromPaste(e);
+    if (!image) return;
+    e.preventDefault();
+    handler(image);
+  };
+  document.addEventListener('paste', listener);
+  return () => document.removeEventListener('paste', listener);
+}
+
 /** The bytes inside a `data:` URL, for Develop's attachment store. */
 function dataUrlBytes(dataUrl        )                    {
   const m = /^data:[^;,]+;base64,(.*)$/.exec(dataUrl);
@@ -285,9 +379,9 @@ function dataUrlBytes(dataUrl        )                    {
 /** Why the draft cannot be sent yet, or null when it can. */
 function draftProblem(d               )                {
   if (d.kind === 'bug') {
-    if (!d.happened.trim()) return 'Say what happened.';
-    if (!d.expected.trim()) return 'Say what you expected to happen.';
-  } else if (!d.request.trim()) {
+    if (!d.summary.trim()) return 'Say what happened.';
+    if (!d.detail.trim()) return 'Say what you expected to happen.';
+  } else if (!d.summary.trim()) {
     return 'Describe your request.';
   }
   return null;
@@ -296,9 +390,8 @@ function draftProblem(d               )                {
 const TITLE_MAX = 80;
 
 /** The work item's title: the first line of what happened, or of the request. */
-function titleFor(d                                                      )         {
-  const src = d.kind === 'bug' ? d.happened : d.request;
-  const line = src.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+function titleFor(d                                         )         {
+  const line = d.summary.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
   const prefix = d.kind === 'bug' ? 'Bug: ' : 'Request: ';
   const room = TITLE_MAX - prefix.length;
   return prefix + (line.length > room ? `${line.slice(0, room - 1).trimEnd()}…` : line);
@@ -358,11 +451,11 @@ function buildFeedbackRow(
     kind: d.kind,
     flag: d.flag,
     title: titleFor(d),
-    happened: isBug ? d.happened.trim() : '',
-    expected: isBug ? d.expected.trim() : '',
-    request: isBug ? '' : d.request.trim(),
-    currentHandling: isBug ? '' : d.currentHandling.trim(),
-    screenshot: d.screenshot ? toPieces(d.screenshot) : null,
+    happened: isBug ? d.summary.trim() : '',
+    expected: isBug ? d.detail.trim() : '',
+    request: isBug ? '' : d.summary.trim(),
+    currentHandling: isBug ? '' : d.detail.trim(),
+    screenshot: d.screenshots.length ? toPieces(d.screenshots.slice(0, SCREENSHOTS_MAX).join('')) : null,
     trail: isBug ? steps : [],
     log: log === null ? null : toPieces(log),
     diagnosticsIncluded: withDiagnostics,
@@ -374,10 +467,10 @@ function buildFeedbackRow(
 }
 
 /**
- * The work item body Develop files — ticket.md. `screenshotRef` is the attachment
- * path the screenshot was stored under (`attachments/<name>`), or null.
+ * The work item body Develop files — ticket.md. `screenshotRefs` are the attachment
+ * paths the screenshots were stored under (`attachments/<name>`), in order.
  */
-function reportBody(r             , screenshotRef               )         {
+function reportBody(r             , screenshotRefs                   )         {
   const who = r.senderName && r.senderEmail ? `${r.senderName} <${r.senderEmail}>` : r.senderEmail || r.senderName || 'unknown sender';
   const what = r.kind === 'bug' ? 'Bug report' : 'Feature request';
   const out           = [
@@ -390,7 +483,9 @@ function reportBody(r             , screenshotRef               )         {
     out.push('**Request**', '', r.request, '');
     if (r.currentHandling) out.push('**How the app handles it today**', '', r.currentHandling, '');
   }
-  if (screenshotRef) out.push(`![screenshot](${screenshotRef})`, '');
+  screenshotRefs.forEach((ref, i) => {
+    out.push(`![${screenshotRefs.length > 1 ? `screenshot ${i + 1}` : 'screenshot'}](${ref})`, '');
+  });
   if (r.kind === 'bug') {
     out.push('**Path through the app**', '', '```', formatTrail(r.trail), '```', '');
     const log = joinPieces(r.log);
@@ -402,5 +497,5 @@ function reportBody(r             , screenshotRef               )         {
   return out.join('\n');
 }
 
-window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, openFeedback, onOpenFeedback, screenshotFromFile, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, openFeedback, onOpenFeedback, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
 })();

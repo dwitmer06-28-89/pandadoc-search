@@ -9,8 +9,8 @@
 
   /** The core's hint promises "the screens you visited"; these apps record none, so say only what is true. */
   const DIAG_HINT = 'Sends a record of what the app was doing so a bug can be found. Without it, bugs may take longer to fix.';
-  /** The inbox refuses a screenshot over 3 MB; the core's downscale keeps it far below. */
-  const SHOT_MAX = 3 * 1024 * 1024;
+  /** The inbox refuses screenshots over 3 MB together; the core's downscale keeps them far below. */
+  const SHOTS_BYTES_MAX = 3 * 1024 * 1024;
   const THANKS_MS = 1200;
 
   const draft = core.emptyDraft('bug');
@@ -18,7 +18,7 @@
   // Set before the first await of a send, so a second click or Cmd-Return cannot post twice.
   let sending = false;
 
-  const fields = ['happened', 'expected', 'request', 'currentHandling'];
+  const fields = ['summary', 'detail'];
   const send = $('send');
 
   function showError(message) {
@@ -28,12 +28,16 @@
 
   function sync() {
     const bug = draft.kind === 'bug';
-    $('bug-fields').hidden = !bug;
-    $('feature-fields').hidden = bug;
+    $('summary-label').textContent = bug ? 'What happened' : 'Your request';
+    $('detail-label').textContent = bug ? 'What did you expect to happen' : 'How does the app handle this today?';
+    $('detail-optional').hidden = bug;
+    $('detail').required = bug;
     $('diag').hidden = !bug || !ctx || !ctx.hasLog;
     send.disabled = sending || !ctx || core.draftProblem(draft) !== null;
-    $('shot-empty').hidden = !!draft.screenshot;
-    $('shot-full').hidden = !draft.screenshot;
+    const n = draft.screenshots.length;
+    $('shot-empty').hidden = n >= core.SCREENSHOTS_MAX;
+    $('shot-add').textContent = n ? 'Add Another…' : 'Add Screenshot…';
+    $('shot-hint').textContent = n ? `(${n} of ${core.SCREENSHOTS_MAX})` : '(optional)';
   }
 
   function segmented(group, onPick) {
@@ -63,8 +67,7 @@
   segmented($('kind'), (v) => {
     draft.kind = v === 'feature' ? 'feature' : 'bug';
     showError('');
-    const first = $(draft.kind === 'bug' ? 'happened' : 'request');
-    requestAnimationFrame(() => first.focus());
+    requestAnimationFrame(() => $('summary').focus());
   });
   segmented($('flag'), (v) => {
     draft.flag = v === 'red' || v === 'yellow' || v === 'blue' ? v : null;
@@ -77,28 +80,54 @@
     });
   }
 
-  $('shot-add').addEventListener('click', () => $('shot-file').click());
-  $('shot-file').addEventListener('change', async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = '';
-    if (!file) return;
+  // Picked, pasted with Cmd-V, or read by the Paste button — one path for all three.
+  async function addShots(read) {
     showError('');
     try {
-      const url = await core.screenshotFromFile(file);
-      if (url.length > SHOT_MAX) throw new Error('That image is too large to send.');
-      draft.screenshot = url;
-      $('shot-img').src = url;
+      const urls = await read();
+      if (!urls.length) throw new Error(core.NO_CLIPBOARD_IMAGE);
+      let next = draft;
+      for (const url of urls) next = core.withScreenshot(next, url);
+      if (next.screenshots.join('').length > SHOTS_BYTES_MAX) throw new Error('Those images are too large to send together.');
+      const overflow = core.screenshotOverflow(draft.screenshots.length, urls.length);
+      draft.screenshots = next.screenshots;
+      drawShots();
+      if (overflow) showError(overflow);
     } catch (err) {
       showError(err instanceof Error ? err.message : 'That image could not be read.');
     }
     sync();
+  }
+
+  function drawShots() {
+    const box = $('shots');
+    box.replaceChildren(
+      ...draft.screenshots.map((url, i) => {
+        const thumb = $('shot-template').content.firstElementChild.cloneNode(true);
+        thumb.querySelector('img').src = url;
+        thumb.querySelector('img').alt = `Screenshot ${i + 1} to send`;
+        const remove = thumb.querySelector('.remove');
+        remove.setAttribute('aria-label', `Remove screenshot ${i + 1}`);
+        remove.addEventListener('click', () => {
+          draft.screenshots = core.withoutScreenshot(draft, i).screenshots;
+          drawShots();
+          sync();
+          $('shot-add').focus();
+        });
+        return thumb;
+      })
+    );
+    box.hidden = draft.screenshots.length === 0;
+  }
+
+  $('shot-add').addEventListener('click', () => $('shot-file').click());
+  $('shot-file').addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length) addShots(() => core.screenshotsFromFiles(files));
   });
-  $('shot-remove').addEventListener('click', () => {
-    draft.screenshot = null;
-    $('shot-img').removeAttribute('src');
-    sync();
-    $('shot-add').focus();
-  });
+  $('shot-paste').addEventListener('click', () => addShots(core.screenshotsFromClipboard));
+  core.onPastedImage((image) => addShots(() => core.screenshotsFromFiles([image])));
 
   $('diag-label').textContent = core.DIAGNOSTICS_SETTING_LABEL;
   $('diag-hint').textContent = DIAG_HINT;
@@ -169,5 +198,5 @@
   );
 
   sync();
-  $('happened').focus();
+  $('summary').focus();
 })();

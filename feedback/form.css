@@ -133,6 +133,8 @@ textarea:focus { outline: 3.5px solid var(--ring); outline-offset: 0; border-col
 .push.default { background: var(--accent); color: #fff; box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.25); }
 .push:disabled { opacity: 0.45; }
 
+#shot-empty { display: flex; gap: 8px; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 10px; }
 .thumb { position: relative; display: inline-block; }
 .thumb img {
   display: block;

@@ -28,39 +28,32 @@
       </div>
     </div>
 
-    <div id="bug-fields">
-      <label class="field">
-        <span class="label">What happened</span>
-        <textarea id="happened" rows="3" required></textarea>
-      </label>
-      <label class="field">
-        <span class="label">What did you expect to happen</span>
-        <textarea id="expected" rows="3" required></textarea>
-      </label>
-    </div>
-
-    <div id="feature-fields" hidden>
-      <label class="field">
-        <span class="label">Your request</span>
-        <textarea id="request" rows="4" required></textarea>
-      </label>
-      <label class="field">
-        <span class="label">How does the app handle this today? <span class="optional">(optional)</span></span>
-        <textarea id="currentHandling" rows="3"></textarea>
-      </label>
-    </div>
+    <!-- The same two boxes on both types; form.js relabels them, so switching keeps what was typed. -->
+    <label class="field">
+      <span class="label" id="summary-label">What happened</span>
+      <textarea id="summary" rows="3" required></textarea>
+    </label>
+    <label class="field">
+      <span class="label"><span id="detail-label">What did you expect to happen</span> <span class="optional" id="detail-optional" hidden>(optional)</span></span>
+      <textarea id="detail" rows="3"></textarea>
+    </label>
 
     <div class="field">
-      <span class="label">Screenshot <span class="optional">(optional)</span></span>
+      <span class="label">Screenshots <span class="optional" id="shot-hint">(optional)</span></span>
+      <!-- form.js draws one .thumb per screenshot here, from the template below. -->
+      <div id="shots" class="thumbs" hidden></div>
+      <template id="shot-template">
+        <div class="thumb">
+          <img alt="">
+          <button type="button" class="remove">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5l6 6M11 5l-6 6"/></svg>
+          </button>
+        </div>
+      </template>
       <div id="shot-empty">
         <button type="button" class="push" id="shot-add">Add Screenshot…</button>
-        <input type="file" id="shot-file" accept="image/*" hidden>
-      </div>
-      <div id="shot-full" class="thumb" hidden>
-        <img id="shot-img" alt="Screenshot to send">
-        <button type="button" class="remove" id="shot-remove" aria-label="Remove screenshot">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5l6 6M11 5l-6 6"/></svg>
-        </button>
+        <button type="button" class="push" id="shot-paste">Paste</button>
+        <input type="file" id="shot-file" accept="image/*" multiple hidden>
       </div>
     </div>
 
