@@ -15,7 +15,7 @@ Commit **only** the files you have edited or written during this conversation �
 
 2. **Verify and filter.** For each path, check that the file still exists and that `git status --porcelain -- <path>` shows it as modified, added, or untracked. Drop any path that is clean or no longer exists — a clean path is already committed (by this session or another one, it makes no difference) and needs nothing from you.
 
-   If the resulting list is empty, do **not** create an empty commit — and do **not** explain the emptiness. The question the user is asking is "are my edits committed?", not "did *you* commit them". Every session file being clean is a yes: report `✅ Fully committed` per **Reporting** and stop. The only exception is a path that is clean because the file is *gone* or the edit was reverted — that is a genuine "could not be committed" case and belongs in the report.
+   If the resulting list is empty, do **not** create an empty commit — and do **not** explain the emptiness. The question the user is asking is "are my edits committed?", not "did *you* commit them". Every session file being clean is a yes: skip to the push step (an earlier commit may still be sitting unpushed), then report per **Reporting**. The only exception is a path that is clean because the file is *gone* or the edit was reverted — that is a genuine "could not be committed" case and belongs in the report.
 
 3. **Secret check.** Before staging, scan paths for likely secrets (`.env`, `credentials*`, `*.pem`, `*.key`, tokens in config). If any match, warn the user and ask before proceeding — do not commit them unless they explicitly confirm.
 
@@ -38,7 +38,7 @@ Commit **only** the files you have edited or written during this conversation �
 
 7. **Confirm commit.** Run `git status` and `git log -1 --stat` to verify the commit landed. Then report per **Reporting** below — do NOT narrate the hash, the subject or the file list.
 
-8. **Push.** Right after the commit is confirmed — before any install step — push it. Committing and pushing are one act: nothing in these repos builds or deploys from a push (every deploy is its own explicit command), so a push costs nothing and needs no permission. Run `git push -u origin HEAD` — it sends the current branch to the same-named branch on GitHub, so on `main` it updates `main`, and in a Develop work item's worktree it updates that item's own branch and never `main` (an item reaches `main` only when Deploy merges it). If the push is rejected because the remote moved on, run `git pull --no-rebase --no-edit` once and push again — if that pull refuses or conflicts (`git merge --abort` on a conflict), stop and report it. A repo with no remote has nothing to push to: skip silently. Never force-push.
+8. **Push.** Right after the commit is confirmed — before any install step — push it. Committing and pushing are one act: nothing in these repos builds or deploys from a push (every deploy is its own explicit command), so a push costs nothing and needs no permission. Run `git push -u origin HEAD` — it sends the current branch to the same-named branch on GitHub, so on `main` it updates `main`, and in a Develop work item's worktree it updates that item's own branch and never `main` (an item reaches `main` only when Deploy merges it). If the push is rejected because the remote moved on, run `git pull --no-rebase --no-edit` once and push again — if that pull refuses or conflicts (`git merge --abort` on a conflict), stop and report it. A repo with no remote has nothing to push to: skip the push, and the verdict is ☑️ (**Reporting**). Never force-push.
 
 9. **Install the desktop app.** Last, build the packaged Electron app and install it to `~/Applications`:
 
@@ -60,7 +60,7 @@ Commit **only** the files you have edited or written during this conversation �
 
 ## Hard rules
 
-- **Always push after committing** (step 8). A commit that stays on this Mac is unfinished work — `/commit`, `/code-review`, a lane agent and Deron typing it himself all end with the work on GitHub. Do not mention a successful push; a push that failed IS pushback — report it under **Reporting** and leave the commit standing.
+- **Always push after committing** (step 8). A commit that stays on this Mac is unfinished work — `/commit`, `/code-review`, a lane agent and Deron typing it himself all end with the work on GitHub. Whether the push landed is the verdict line (**Reporting**); a failed push leaves the commit standing.
 - **Never amend.** Always create a new commit.
 - **Never use `git add -A` / `git add .` / `git add -u`.** Stage files individually by path.
 - **Never skip hooks** (no `--no-verify`). If a hook fails, fix the underlying issue and create a new commit.
@@ -70,15 +70,21 @@ Commit **only** the files you have edited or written during this conversation �
 
 ## Reporting
 
-Report **only** two things. Nothing else — no file tables, no commit hashes, no commit-message rationale, no repo tours, no restating the pre-commit checks, no push/branch status, no summary of what the commits contained, no offers of follow-up work.
+Report **only** the verdict line (below) and two things. Nothing else — no file tables, no commit hashes, no commit-message rationale, no repo tours, no restating the pre-commit checks, no branch status, no summary of what the commits contained, no offers of follow-up work.
 
 1. **Session files that could NOT be committed.** A file you edited this session whose changes are *not in git* — kept out by a hook, a lock, a conflict, or another session's in-flight state, or reverted/deleted out from under you. Name the file and the one-line reason, so the user knows to come back after that other session finishes.
 
    A file whose changes already landed in an earlier commit — this session's or another's — is committed. It is not a caveat, not a partial success, and not worth a word. Never report which commit a change went into, never distinguish "I committed it" from "it was already committed", and never say you skipped creating an empty commit. All of that is ✅.
 2. **Push back on the commit.** A real concern about what was just committed: a secret-shaped value, a dev-server address, a hook you had to work around, a change you think is wrong. One or two sentences.
 
-If neither applies, your entire response is:
+**The verdict line** comes first, always, and is one of exactly two. Before writing it, check the branch has nothing left to send: `git rev-list --count @{u}..HEAD` is `0` (an error means no upstream, which is not pushed).
 
-✅ Fully committed
+- Pushed — the commit is on GitHub:
 
-That is the whole reply.
+  ✅ Committed and pushed
+
+- Committed, but GitHub does not have it yet — no remote, a rejected push, a pull that conflicted, no network. The reason in 1–15 words, plain language:
+
+  ☑️ Committed but not yet pushed: GitHub has newer commits and the pull conflicted in `src/app.ts`
+
+If neither numbered item applies, the verdict line is the whole reply.
