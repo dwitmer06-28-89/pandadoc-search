@@ -52,6 +52,41 @@ actually use and it auto-updates; installing an unreleased build there by hand i
 both risky and pointless, since the next release silently replaces it. Release is
 the debug-off build you can freely clobber.
 
+## 0. Already installed? Check before you build
+
+Parallel sessions run this skill against the same installed app, so the build you
+are about to start has often already happened in another one. Before building each
+device, ask its stamp — the exact tree (committed, uncommitted and untracked) the
+last install through this skill was built from, shared by every worktree of the repo:
+
+```bash
+bash ~/Documents/Code/ProjectGlobals/scripts/lane-stamp.sh check <lane> <device> <files this session changed>
+```
+
+`<lane>` is this skill's (`release` or `prod`), `<device>` the device word being
+run. List the files this session — or the ticket in hand — changed; with none
+listed, only an identical tree counts.
+
+- **`CURRENT` or `CONTAINS`** — it is already installed. Don't build. Say so in one
+  line: which device, when, from which branch — and for `CONTAINS`, that the
+  installed build also differs in the other files it lists (someone else's work).
+  Rebuild only when Deron says to.
+- **`BUILDING`** — another session is building this lane on this device right now.
+  Never start a second build: they share one output folder. Run the same script with
+  `wait <lane> <device>` (Bash timeout 600000; it gives up after 9 minutes, so run it
+  again if it says so), then check again — it is usually `CURRENT` by then.
+- **`STALE` or `NONE`** — build, through the stamp, so the next check knows:
+  `bash ~/Documents/Code/ProjectGlobals/scripts/lane-stamp.sh run <lane> <device> --
+  <the arm's command>`. It stamps only when the command exits 0. A command chained
+  with `&&` goes in whole as `bash -c '<the arm's command>'`, or only its first half
+  runs under the stamp.
+
+This applies to arms that INSTALL — into `~/Applications`, onto a tethered device,
+or onto a simulator. An arm that serves the build from a process it starts (a
+`browser` arm, a `desktop` arm that runs a local server) always runs: the last run's
+process is gone. A build started by hand in Terminal never updates a stamp, so if
+Deron says he built something himself, build.
+
 ## 1. It builds from the working tree — say what's in it
 
 The script prints `git status --porcelain` first. Dirty work is included by design.
