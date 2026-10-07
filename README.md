@@ -101,16 +101,22 @@ The thread resets when you navigate to a different document, and after ten minut
 Everyone who uses the app signs in with their own Claude account, and assessments come
 out of **that account's subscription** rather than metered API credits. There's no shared
 key, and the app never holds a credential of its own. The first time you open the panel
-it walks you through two steps:
+it walks you through two steps: install Claude Code, then sign in.
 
 ```sh
 npm install -g @anthropic-ai/claude-code   # handles the login
-claude auth login                          # opens a browser
 ```
 
 Once Claude Code is installed, the panel's **Sign in…** button runs `claude auth login`
 for you and waits for the browser round trip to finish. The credential lands in your
 login keychain, where the Claude Agent SDK reads it — so nothing is stored by this app.
+
+The app has **its own Claude sign-in**: every `claude` it starts runs with
+`CLAUDE_CONFIG_DIR` set to `~/Library/Application Support/pandadoc-search-claude-config`
+(`claude-config.js`; your `CLAUDE.md`, settings and skills are linked in from
+`~/.claude`, which it never writes to). Switching accounts in Develop or Terminal
+never switches this app, and the other way round — which is also why the sign-in
+is the panel's button and not `claude auth login` typed in Terminal.
 **Account** in the panel shows who's signed in, which plan, and can sign them out again.
 
 Assessments run through the Agent SDK with **no tools enabled at all** — no shell, no

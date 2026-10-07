@@ -34,6 +34,7 @@
       "ai-preload.js",
       "ai.html",
       "assess.js",
+      "claude-config.js",
       "config.js",
       "feedback/**",
       "assets/**/*",

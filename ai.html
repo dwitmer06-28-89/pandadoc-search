@@ -1055,9 +1055,13 @@
       // subscription rather than metered API credits. The login belongs to
       // Claude Code; this screen is the instructions for it, plus a button that
       // runs it.
+      //
+      // The sign-in itself is ONLY ever the button. This app has its own Claude
+      // sign-in (claude-config.js), and `claude auth login` typed in Terminal
+      // signs in the default one Develop and Terminal use instead — so the
+      // command is never offered here.
 
       const INSTALL_CMD = 'npm install -g @anthropic-ai/claude-code';
-      const LOGIN_CMD = 'claude auth login';
 
       // How long to keep watching for a browser sign-in to land. Long enough to
       // include creating an account and picking a workspace.
@@ -1152,12 +1156,9 @@
               'sees a key.</p>' +
               '<div class="foot" style="padding-top:2px"><span class="grow"></span>' +
               '<button class="btn quiet" id="recheck">Check again</button>' +
-              '<button class="btn" id="signin">Sign in…</button></div>' +
-              '<p style="margin:11px 0 4px">Or run it yourself:</p>' +
-              cmdRow(LOGIN_CMD)
-            : '<p>Then run this. It opens a browser; sign in with your own ' +
-              'Claude account.</p>' +
-              cmdRow(LOGIN_CMD) +
+              '<button class="btn" id="signin">Sign in…</button></div>'
+            : '<p>Then press Check again, and sign in from here with your ' +
+              'own Claude account.</p>' +
               '<div class="foot"><span class="grow"></span>' +
               '<button class="btn" id="recheck">Check again</button></div>');
 

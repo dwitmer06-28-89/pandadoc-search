@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
+const { ensureConfigDir, claudeEnv } = require('./claude-config');
 
 let app = null;
 let getContractView = () => null; // set by init(); returns a WebContents or null
@@ -29,6 +30,27 @@ function init(deps) {
 // The CLI is used for the account side only (status, sign in, sign out). The
 // asking itself goes through the Agent SDK's own bundled executable, so a
 // missing `claude` on PATH can't break a signed-in install.
+//
+// Every one of those runs with runnerEnv(): this app's own Claude settings
+// folder (claude-config.js), never the default `~/.claude` that Develop and
+// Terminal sign in to. On the default one, switching accounts in Develop
+// switched this app too. A call left on the bare environment still works —
+// against the wrong account — so none may be.
+
+// Folders left as they are because a real file sat where a link would go —
+// logged once each rather than on every status poll.
+const reportedBlocked = new Set();
+
+function runnerEnv() {
+  const appData = app.getPath('appData');
+  const { blocked } = ensureConfigDir({ appData, home: os.homedir() });
+  for (const b of blocked) {
+    if (reportedBlocked.has(b)) continue;
+    reportedBlocked.add(b);
+    console.warn(`[claude-config] left as it is, not linked: ${b}`);
+  }
+  return claudeEnv({ appData, baseEnv: process.env });
+}
 
 // Earlier versions kept a pasted API key here. It's dead weight now, and a
 // secret nobody is going to think to clean up by hand.
@@ -105,7 +127,7 @@ let lastAccountLabel = '';
 // pointed at API billing, which is the distinction this whole change is about.
 function readAuth(cli) {
   return new Promise((resolve) => {
-    execFile(cli, ['auth', 'status', '--json'], { timeout: 15000 }, (err, stdout) => {
+    execFile(cli, ['auth', 'status', '--json'], { timeout: 15000, env: runnerEnv() }, (err, stdout) => {
       try {
         resolve(JSON.parse(stdout));
       } catch {
@@ -160,6 +182,7 @@ async function signIn() {
 
   try {
     const child = spawn(cli, ['auth', 'login', '--claudeai'], {
+      env: runnerEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });
@@ -194,7 +217,7 @@ async function signOut() {
   if (!cli) return { error: 'no-cli' };
 
   return new Promise((resolve) => {
-    execFile(cli, ['auth', 'logout'], { timeout: 20000 }, (err, stdout, stderr) => {
+    execFile(cli, ['auth', 'logout'], { timeout: 20000, env: runnerEnv() }, (err, stdout, stderr) => {
       resetThread();
       if (err) {
         const msg = `${stderr || ''}${stdout || ''}`.trim();
@@ -1037,16 +1060,6 @@ async function loadAgentSdk() {
   return agentSdk;
 }
 
-// The whole point of the Claude login is that assessments come out of the
-// person's subscription. A key left in the environment would quietly send them
-// to metered API billing instead, so it doesn't get passed down.
-function subprocessEnv() {
-  const env = { ...process.env };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
-  return env;
-}
-
 const LIMIT_NAMES = {
   five_hour: 'five-hour limit',
   seven_day: 'weekly limit',
@@ -1166,7 +1179,10 @@ async function ask(
         includePartialMessages: true,
         maxTurns: 1,
         cwd: app.getPath('userData'),
-        env: subprocessEnv(),
+        // This app's own sign-in, with no API key — see runnerEnv(). A key left
+        // in the environment would quietly bill metered API credits instead of
+        // the person's subscription.
+        env: runnerEnv(),
         // Use the Claude Code the person actually signed in with. Left to
         // itself the SDK resolves its own native build, which on a machine
         // that has none means a ~290MB download at the worst possible moment —
