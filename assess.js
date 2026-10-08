@@ -1213,9 +1213,14 @@ async function ask(
 
       // Subscription limits arrive as their own event rather than an error, and
       // a warning-level one shouldn't derail an answer that's streaming fine.
+      // Nor does a plan at 100% with extra usage on: it still reports
+      // `rejected`, but the turn runs on credits and answers normally (same
+      // test as Driven's electron/claude-agent.js).
       if (msg.type === 'rate_limit_event') {
         const info = msg.rate_limit_info || {};
-        if (info.status === 'rejected') limit = info;
+        const overageCarries = info.isUsingOverage || info.overageInUse
+          || info.overageStatus === 'allowed' || info.overageStatus === 'allowed_warning';
+        if (info.status === 'rejected' && !overageCarries) limit = info;
         continue;
       }
 

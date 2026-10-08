@@ -95,12 +95,21 @@ function ensureConfigDir({ appData, home }) {
  * is NOT tidying: a stray `ANTHROPIC_API_KEY` would still let a run succeed, but
  * bill metered API credits instead of the subscription the person signed in
  * with. The failure is a surprise invoice, not an error.
+ *
+ * `ANTHROPIC_CONFIG_DIR` is pointed at an empty folder for the same reason. From
+ * CLI 2.1.294 a folder with no sign-in falls back to the Anthropic developer
+ * profile in `~/.config/anthropic` — an API-workspace token, no email — and
+ * reports it as signed in. `auth logout` can't clear it, so Quick Claude showed
+ * "Signed in as your Claude account", hid Sign in, and Sign out did nothing
+ * (2026-10-08). `ANTHROPIC_PROFILE` is dropped so it can't name one either.
  */
 function claudeEnv({ appData, baseEnv }) {
   const env = { ...baseEnv };
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.ANTHROPIC_PROFILE;
   env.CLAUDE_CONFIG_DIR = configDirFor(appData);
+  env.ANTHROPIC_CONFIG_DIR = path.join(configDirFor(appData), 'no-anthropic-profile');
   return env;
 }
 
