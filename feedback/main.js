@@ -23,9 +23,10 @@
 //   ...menu template, under Help or the app menu: feedback.menuItem('help menu')
 //   ...anywhere else:                              feedback.open('right-click')
 
-const { BrowserWindow, ipcMain, nativeTheme, net } = require('electron');
+const { app: electronApp, BrowserWindow, ipcMain, nativeTheme, net } = require('electron');
 const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const INBOX = require('./inbox.json');
@@ -41,6 +42,39 @@ const MAX_HEIGHT = 860;
 const SENDER_NOTICE = 'Your name and this Mac’s name are sent with the report.';
 
 let installed = false;
+
+/**
+ * Whether this is Deron's Mac: Develop writes its lane scripts into this folder at
+ * every launch, and Develop only runs on his Macs. The Feature picker is his alone
+ * (FEEDBACK.md, "The feature picker"); these apps have no sign-in to ask instead.
+ */
+function isOwnersMac() {
+  try {
+    return fs.statSync(path.join(electronApp.getPath('appData'), 'develop-claude-lanes')).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The app's Develop features, `[{ id, name }]` — [] off Deron's Mac, when it has none, or when unreachable. Never throws. */
+async function readFeatures(appName) {
+  if (!isOwnersMac()) return [];
+  const doFetch = typeof net?.fetch === 'function' ? net.fetch.bind(net) : fetch;
+  try {
+    const res = await doFetch(`${INBOX.url}/features/${encodeURIComponent(appName)}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const list = await res.json();
+    return Array.isArray(list)
+      ? list.filter((f) => f && typeof f.id === 'string' && f.id && typeof f.name === 'string' && f.name.trim())
+          .slice(0, 100)
+          .map((f) => ({ id: f.id, name: f.name.trim() }))
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 /** A command's trimmed output, or '' when it is missing or fails. Never throws. */
 function run(file, args) {
@@ -127,6 +161,12 @@ function setup(options) {
     if (!fromForm(event)) return null;
     const s = await senderPromise;
     return { app: appName, id: reportId, source, hasLog, senderName: s.senderName, senderNotice: SENDER_NOTICE };
+  });
+
+  // Asked separately so the form opens at once and the picker appears when the list arrives.
+  ipcMain.handle('desktop-feedback:features', async (event) => {
+    if (!fromForm(event)) return [];
+    return readFeatures(appName);
   });
 
   ipcMain.handle('desktop-feedback:log', async (event) => {

@@ -34,6 +34,13 @@
 
                                                                                   
 
+                                       
+
+/**
+ * A feature of the app's Develop project (Develop's Features tab), as the form
+ * offers it. Develop publishes each project's list; `fetchFeedbackFeatures` reads it.
+ */
+
 /**
  * What the form collects before it becomes a row. The two text boxes belong to the
  * form, not to the type: switching Bug ↔ Feature request relabels them and keeps
@@ -41,7 +48,7 @@
  */
 
 function emptyDraft(kind               = 'bug')                {
-  return { kind, flag: null, summary: '', detail: '', screenshots: [] };
+  return { kind, flag: null, summary: '', detail: '', screenshots: [], feature: null };
 }
 
 // ── The trail ─────────────────────────────────────────────────────────────────
@@ -227,6 +234,73 @@ const DIAGNOSTICS_SETTING_HINT =
 const DIAGNOSTICS_NOTICE =
   'Bug reports include diagnostic info about what the app was doing. You can turn this off in Settings.';
 const SENDER_NOTICE = 'Your name and email are sent with the report.';
+
+// ── The feature picker ────────────────────────────────────────────────────────
+// Only Deron files reports under a feature (Deron, 2026-10-08): everyone else's
+// report lands with none and he sets it in Develop. The list is the app's own
+// project's features, which Develop publishes to the feedback inbox.
+
+/** The addresses Deron signs in with. The picker is shown only to these. */
+const FEEDBACK_OWNER_EMAILS                    = ['deron@rooted.software', 'deronwitmer@gmail.com'];
+
+function isFeedbackOwner(email                           )          {
+  const e = (email ?? '').trim().toLowerCase();
+  return !!e && FEEDBACK_OWNER_EMAILS.includes(e);
+}
+
+/** The feedback inbox (`ProjectGlobals/feedback-inbox/`); `desktop-feedback/inbox.json` names the same one. */
+const FEEDBACK_INBOX_URL = 'https://feedback-inbox.drivendev.workers.dev';
+const FEATURE_LABEL = 'Feature';
+const NO_FEATURE_LABEL = 'No feature';
+const FEATURES_KEY = 'feedback.features.';
+const FEATURES_TIMEOUT_MS = 8_000;
+
+/** Well-formed features only, in order, at most 100. */
+function cleanFeedbackFeatures(raw         )                    {
+  if (!Array.isArray(raw)) return [];
+  const out                    = [];
+  for (const f of raw) {
+    const r = f                                  ;
+    if (!r || typeof r.id !== 'string' || !r.id || typeof r.name !== 'string' || !r.name.trim()) continue;
+    if (out.some((o) => o.id === r.id)) continue;
+    out.push({ id: r.id, name: r.name.trim() });
+    if (out.length >= 100) break;
+  }
+  return out;
+}
+
+/**
+ * `app`'s features, in Develop's order — [] when it has none. Offline or refused:
+ * the list this device last read, or [] (the picker then stays hidden and the
+ * report sends with no feature). Never throws. Call only for the owner.
+ */
+async function fetchFeedbackFeatures(app        )                             {
+  const key = FEATURES_KEY + app;
+  try {
+    const res = await fetch(`${FEEDBACK_INBOX_URL}/features/${encodeURIComponent(app)}`, {
+      signal: AbortSignal.timeout(FEATURES_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const list = cleanFeedbackFeatures(await res.json());
+    try {
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch {
+      /* private mode — fine, the next open asks again */
+    }
+    return list;
+  } catch {
+    try {
+      return cleanFeedbackFeatures(JSON.parse(localStorage.getItem(key) ?? '[]'));
+    } catch {
+      return [];
+    }
+  }
+}
+
+/** The draft's feature if it is still in `features`, else null — a stale pick is never sent. */
+function pickedFeature(d                                , features                            )                {
+  return d.feature && features.some((f) => f.id === d.feature) ? d.feature : null;
+}
 
 // ── Opening the form ──────────────────────────────────────────────────────────
 
@@ -481,6 +555,9 @@ function buildFeedbackRow(
     senderEmail: ctx.senderEmail,
     platform: platformName(),
     userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+    // Only when picked — see `FeedbackRow.feature`. A draft held from before
+    // features existed has no key, which reads the same as none.
+    ...(d.feature ? { feature: d.feature } : {}),
   };
 }
 
@@ -515,5 +592,5 @@ function reportBody(r             , screenshotRefs                   )         {
   return out.join('\n');
 }
 
-window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, openFeedback, onOpenFeedback, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
 })();

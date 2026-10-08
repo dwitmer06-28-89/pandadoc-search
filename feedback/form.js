@@ -15,6 +15,8 @@
 
   const draft = core.emptyDraft('bug');
   let ctx = null;
+  /** The Feature picker's list; empty keeps it hidden. */
+  let features = [];
   // Set before the first await of a send, so a second click or Cmd-Return cannot post twice.
   let sending = false;
   // Set while a screenshot is read, so a double click on Add or Paste adds it once.
@@ -76,6 +78,29 @@
   segmented($('flag'), (v) => {
     draft.flag = v === 'red' || v === 'yellow' || v === 'blue' ? v : null;
   });
+
+  $('feature-label').textContent = core.FEATURE_LABEL;
+  $('feature').addEventListener('change', (e) => {
+    draft.feature = e.target.value || null;
+  });
+
+  function drawFeatures() {
+    const select = $('feature');
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = core.NO_FEATURE_LABEL;
+    select.replaceChildren(
+      none,
+      ...features.map((f) => {
+        const o = document.createElement('option');
+        o.value = f.id;
+        o.textContent = f.name;
+        return o;
+      })
+    );
+    select.value = core.pickedFeature(draft, features) ?? '';
+    $('feature-field').hidden = features.length === 0;
+  }
 
   for (const name of fields) {
     $(name).addEventListener('input', (e) => {
@@ -170,7 +195,8 @@
     send.textContent = 'Sending…';
     try {
       const log = ctx.hasLog ? await bridge.log() : null;
-      const row = core.buildFeedbackRow(draft, {
+      // Only a feature still in the list shown — a stale pick is never sent.
+      const row = core.buildFeedbackRow({ ...draft, feature: core.pickedFeature(draft, features) }, {
         id: ctx.id,
         app: ctx.app,
         senderName: ctx.senderName,
@@ -202,6 +228,13 @@
       $('notice').textContent = ctx.senderNotice;
       $('sender').textContent = `Sent as ${ctx.senderName}.`;
       sync();
+      bridge.features().then(
+        (list) => {
+          features = Array.isArray(list) ? list : [];
+          drawFeatures();
+        },
+        () => {}
+      );
     },
     () => showError('The feedback window could not start. Close it and try again.')
   );

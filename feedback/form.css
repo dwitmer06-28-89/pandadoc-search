@@ -115,6 +115,16 @@ textarea {
 }
 textarea:focus { outline: 3.5px solid var(--ring); outline-offset: 0; border-color: transparent; }
 
+/* Pop-up button (NSPopUpButton) — the system's own select. */
+select {
+  display: block;
+  height: 24px;
+  min-width: 160px;
+  font: inherit;
+  color: var(--fg);
+}
+select:focus-visible { outline: 3px solid var(--ring); outline-offset: 1px; }
+
 /* Push buttons (NSButton, rounded bezel). */
 .push {
   height: 24px;
