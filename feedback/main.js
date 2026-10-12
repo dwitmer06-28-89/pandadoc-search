@@ -116,8 +116,11 @@ function isOwnPage(url) {
 const CONSOLE_LEVELS = ['debug', 'info', 'warning', 'error'];
 
 function watchContents(wc) {
-  // Electron 35+ hands one event with named fields; older ones pass them positionally.
-  wc.on('console-message', (e, level, message, line, sourceId) => {
+  // Electron 35+ hands one event with named fields; older ones (SwapSaver, Claude
+  // Global ride 33) pass them positionally. Rest parameters keep the listener's
+  // declared arity at one, so a newer Electron sees nothing to call deprecated.
+  wc.on('console-message', (e, ...legacy) => {
+    const [level, message, line, sourceId] = legacy;
     const lvl = typeof e?.level === 'string' ? e.level : CONSOLE_LEVELS[level];
     if (lvl !== 'warning' && lvl !== 'error') return;
     if (!isOwnPage(wc.getURL())) return;
@@ -223,7 +226,6 @@ function setup(options) {
   installed = true;
 
   // Every app has a log now: its own, or the record kept here.
-  const hasLog = true;
   if (typeof options.getLog !== 'function') installLogCapture(appName);
   const getLog = typeof options.getLog === 'function' ? options.getLog : () => logLines.join('\n');
   const getParent = typeof options.parent === 'function' ? options.parent : () => null;
@@ -239,7 +241,7 @@ function setup(options) {
   ipcMain.handle('desktop-feedback:context', async (event) => {
     if (!fromForm(event)) return null;
     const s = await senderPromise;
-    return { app: appName, id: reportId, source, hasLog, senderName: s.senderName, senderNotice: SENDER_NOTICE };
+    return { app: appName, id: reportId, source, hasLog: true, senderName: s.senderName, senderNotice: SENDER_NOTICE };
   });
 
   // Asked separately so the form opens at once and the picker appears when the list arrives.
