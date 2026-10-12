@@ -152,6 +152,14 @@ over per step 4 rather than inventing a way to see the app.
 
 - Anything else (a CLI, a library): run it however its own docs say and observe its actual output.
 
+**Before the first check, confirm who the app is signed in as** — the sign-in screen, a test
+account, or an account with none of the operator's data all count as signed out (`/validate`'s
+step 3·sign-in says how to tell). Signed out → tick nothing and do not reconstruct: stop
+blocked, leading with the ask, e.g. *"The iPhone simulator is signed into a test account with no
+calendar. Sign in and re-run validation — or tell me to rebuild the scenario with throwaway
+data, which may not match your real setup."* A pass on an empty account is a pass on a different
+app.
+
 If you cannot get the app running at all, that is a step-2 failure and it is not a subtle one:
 stop blocked, say what you tried and what happened, and tick nothing. A validation pass over an
 app that never started is the worst possible outcome, because everything simply stays queued and
