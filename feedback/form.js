@@ -173,6 +173,21 @@
 
   $('cancel').addEventListener('click', () => bridge.close());
 
+  // Copy log: the log a bug report would carry, for pasting straight to Claude.
+  // Main writes the clipboard (Electron's own), so no page permission is involved.
+  $('copy-log').addEventListener('click', async () => {
+    const btn = $('copy-log');
+    btn.disabled = true;
+    try {
+      await bridge.copy(core.logWithTrail(await bridge.log()));
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = 'Copy Log'; btn.disabled = false; }, 1500);
+    } catch (err) {
+      showError(`The log didn’t copy: ${err instanceof Error ? err.message : String(err)}`);
+      btn.disabled = false;
+    }
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !sending) {
       e.preventDefault();
@@ -227,6 +242,7 @@
       core.recordOpen(`feedback form (${ctx.source || 'menu'})`);
       $('notice').textContent = ctx.senderNotice;
       $('sender').textContent = `Sent as ${ctx.senderName}.`;
+      $('copy-log').hidden = !ctx.hasLog;
       sync();
       bridge.features().then(
         (list) => {

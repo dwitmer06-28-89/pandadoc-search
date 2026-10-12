@@ -11,7 +11,7 @@
  *
  * What lives here is everything that must behave the SAME in every app — the report's
  * shape, the path-through-the-app trail, the diagnostic-info preference, the screenshot
- * downscale and clipboard paste, the title and the body Develop files. What does NOT live here is UI: each
+ * downscale and clipboard paste, Copy log's text, the title and the body Develop files. What does NOT live here is UI: each
  * app draws the form with its own sheet, buttons and toast, so it looks native to that
  * app. No React, no DOM-only imports at module scope — Develop's Mac process imports
  * this file to format the reports it collects.
@@ -456,6 +456,47 @@ function onPastedImage(handler                       )             {
   return () => document.removeEventListener('paste', listener);
 }
 
+// ── Copy log ──────────────────────────────────────────────────────────────────
+// A button directly left of the form's close ✕ (Deron, 2026-10-11): copies the log a
+// bug report would carry, for pasting straight to Claude instead of sending a report.
+// It works signed in or not, on either type, whatever the diagnostic-info switch says.
+
+const COPY_LOG_LABEL = 'Copy log';
+const LOG_COPIED = 'Log copied';
+const CLIPBOARD_UNWRITABLE = 'The clipboard refused the copy.';
+
+/** What Copy log copies: the app's log, untrimmed, then the path through the app (when any was recorded). */
+function logWithTrail(log                           )         {
+  const body = (log ?? '').trimEnd();
+  const steps = getTrail();
+  if (!steps.length) return body || '(no log recorded)';
+  return `${body}${body ? '\n\n' : ''}=== path through the app ===\n${formatTrail(steps)}`;
+}
+
+/**
+ * Copy log: puts `logWithTrail(log)` on the clipboard. Call it straight from the tap —
+ * WKWebView ties a clipboard write to the gesture that started it and an `await` before
+ * the write loses it, so a log still being built is passed as a PROMISE, which
+ * ClipboardItem takes inside the gesture and fills in when it resolves. Rejects when
+ * the clipboard refuses; say so with the app's toast.
+ */
+async function copyLogWithTrail(log                                        )                {
+  const text = Promise.resolve(log).then(logWithTrail);
+  const clip = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (!clip) throw new Error(CLIPBOARD_UNWRITABLE);
+  const Item = typeof ClipboardItem === 'undefined' ? undefined : ClipboardItem;
+  if (Item && typeof clip.write === 'function') {
+    try {
+      await clip.write([new Item({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })]);
+      return;
+    } catch {
+      /* an engine without promise payloads — writeText below */
+    }
+  }
+  if (typeof clip.writeText !== 'function') throw new Error(CLIPBOARD_UNWRITABLE);
+  await clip.writeText(await text);
+}
+
 /** The bytes inside a `data:` URL, for Develop's attachment store. */
 function dataUrlBytes(dataUrl        )                    {
   const m = /^data:[^;,]+;base64,(.*)$/.exec(dataUrl);
@@ -592,5 +633,5 @@ function reportBody(r             , screenshotRefs                   )         {
   return out.join('\n');
 }
 
-window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
 })();

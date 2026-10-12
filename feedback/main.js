@@ -23,7 +23,7 @@
 //   ...menu template, under Help or the app menu: feedback.menuItem('help menu')
 //   ...anywhere else:                              feedback.open('right-click')
 
-const { app: electronApp, BrowserWindow, ipcMain, nativeTheme, net } = require('electron');
+const { app: electronApp, BrowserWindow, clipboard, ipcMain, nativeTheme, net } = require('electron');
 const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -177,6 +177,12 @@ function setup(options) {
     } catch {
       return null;
     }
+  });
+
+  ipcMain.handle('desktop-feedback:copy', (event, text) => {
+    if (!fromForm(event) || typeof text !== 'string') return false;
+    clipboard.writeText(text);
+    return true;
   });
 
   ipcMain.handle('desktop-feedback:send', async (event, row) => {

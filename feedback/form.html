@@ -75,6 +75,9 @@
     <p class="error" id="error" role="alert" hidden></p>
 
     <div class="actions">
+      <!-- Shown only when the app keeps a log: copies it for pasting straight to Claude. -->
+      <button type="button" class="push" id="copy-log" hidden>Copy Log</button>
+      <span class="spacer"></span>
       <button type="button" class="push" id="cancel">Cancel</button>
       <button type="submit" class="push default" id="send" disabled>Send</button>
     </div>

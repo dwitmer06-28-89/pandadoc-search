@@ -181,6 +181,8 @@ select:focus-visible { outline: 3px solid var(--ring); outline-offset: 1px; }
 .error { margin: 0 0 10px; font-size: 12px; color: var(--red); -webkit-user-select: text; user-select: text; }
 
 .actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 6px; }
+/* Copy Log sits at the far left, the macOS place for a dialog's secondary action. */
+.actions .spacer { flex: 1; }
 
 .sent {
   display: flex;
