@@ -58,9 +58,9 @@ let recents = [];
 // "Send Feedback…" — the shared desktop client in ./feedback (a byte-identical
 // copy of ProjectGlobals/shared-code/desktop-feedback; never edit it here). A
 // report goes to the feedback inbox and lands in this app's Develop backlog.
-// No getLog: the app keeps no log of its own (dark-mode.log is an opt-in
-// debug file), so a report carries the path through the form only and the
-// form's Copy Log button stays hidden. The form
+// No getLog: the client keeps the app's warnings and errors itself
+// (dark-mode.log is an opt-in debug file, not a log), and a bug report and
+// Copy Log carry that record. The form
 // stays above the PandaDoc window when one is open.
 const feedback = require('./feedback/main.js').setup({
   app: 'Pandadoc Search',

@@ -19,11 +19,11 @@
 // so the window needs no network access at all (its CSP allows none).
 //
 // Usage (the whole of an app's wiring):
-//   const feedback = require('./feedback/main.js').setup({ app: 'Pandadoc Search', getLog });
+//   const feedback = require('./feedback/main.js').setup({ app: 'Pandadoc Search' });
 //   ...menu template, under Help or the app menu: feedback.menuItem('help menu')
 //   ...anywhere else:                              feedback.open('right-click')
 
-const { app: electronApp, BrowserWindow, clipboard, ipcMain, nativeTheme, net } = require('electron');
+const { app: electronApp, BrowserWindow, clipboard, ipcMain, nativeTheme, net, webContents } = require('electron');
 const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -74,6 +74,82 @@ async function readFeatures(appName) {
   } catch {
     return [];
   }
+}
+
+// ── The app's own record ─────────────────────────────────────────────────────
+// What a bug report's diagnostic info and Copy Log carry when the app keeps no log
+// of its own (Deron, 2026-10-11: every desktop app records). Warnings and errors
+// only — from the main process and from the app's OWN pages (file:// and its local
+// server), never from a site it wraps (Slack, Core), whose console is someone
+// else's and may carry their content. The newest LOG_MAX_LINES are kept, each
+// capped, in memory only: nothing is written to disk and it ends with the app.
+
+const LOG_MAX_LINES = 300;
+const LOG_LINE_MAX = 1000;
+let logLines = [];
+
+function logArg(a) {
+  if (a instanceof Error) return `${a.name}: ${a.message}${a.stack ? `\n${a.stack}` : ''}`;
+  if (typeof a === 'string') return a;
+  try {
+    return JSON.stringify(a) ?? String(a);
+  } catch {
+    return String(a);
+  }
+}
+
+function logLine(level, text) {
+  logLines.push(`${new Date().toISOString()} ${level} ${String(text).slice(0, LOG_LINE_MAX)}`);
+  if (logLines.length > LOG_MAX_LINES) logLines = logLines.slice(-LOG_MAX_LINES);
+}
+
+/** The app's own UI — a bundled file or its own local server — rather than a site it wraps. */
+function isOwnPage(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'file:' || (/^https?:$/.test(u.protocol) && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname));
+  } catch {
+    return false;
+  }
+}
+
+const CONSOLE_LEVELS = ['debug', 'info', 'warning', 'error'];
+
+function watchContents(wc) {
+  // Electron 35+ hands one event with named fields; older ones pass them positionally.
+  wc.on('console-message', (e, level, message, line, sourceId) => {
+    const lvl = typeof e?.level === 'string' ? e.level : CONSOLE_LEVELS[level];
+    if (lvl !== 'warning' && lvl !== 'error') return;
+    if (!isOwnPage(wc.getURL())) return;
+    const msg = typeof e?.message === 'string' ? e.message : message;
+    const src = typeof e?.sourceId === 'string' ? e.sourceId : sourceId;
+    const ln = typeof e?.lineNumber === 'number' ? e.lineNumber : line;
+    logLine(lvl === 'error' ? 'ERROR' : 'WARN', `[page] ${msg}${src ? ` (${path.basename(String(src))}:${ln})` : ''}`);
+  });
+  wc.on('render-process-gone', (_e, d) => logLine('GONE', `a window's page stopped: ${d?.reason ?? 'unknown'}`));
+  wc.on('unresponsive', () => logLine('WARN', 'a window stopped responding'));
+}
+
+function installLogCapture(appName) {
+  for (const level of ['warn', 'error']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => {
+      logLine(level.toUpperCase(), args.map(logArg).join(' '));
+      original(...args);
+    };
+  }
+  // The monitor observes a crash without changing what the app does about it —
+  // an 'uncaughtException' listener would stop it from crashing at all.
+  process.on('uncaughtExceptionMonitor', (err, origin) => logLine('UNCAUGHT', `${origin}: ${logArg(err)}`));
+  electronApp.on('child-process-gone', (_e, d) => logLine('GONE', `${d?.type ?? 'helper'} stopped: ${d?.reason ?? 'unknown'}`));
+  electronApp.on('web-contents-created', (_e, wc) => watchContents(wc));
+  // Windows made before setup() still get watched.
+  try {
+    for (const wc of webContents.getAllWebContents()) watchContents(wc);
+  } catch {
+    /* before the app is ready there are none */
+  }
+  logLine('INFO', `${appName} ${electronApp.getVersion()} started · Electron ${process.versions.electron} · macOS ${process.getSystemVersion?.() ?? os.release()}`);
 }
 
 /** A command's trimmed output, or '' when it is missing or fails. Never throws. */
@@ -132,9 +208,10 @@ async function postReport(row) {
  * @param {object} options
  * @param {string} options.app  This app's Develop project name, exactly: "Pandadoc Search",
  *   "Slack Wrapper", "CoreWrapper", "SwapSaver" or "Claude Global". The inbox refuses others.
- * @param {() => (string | null | Promise<string | null>)} [options.getLog]  The app's log,
- *   if it keeps one (its newest end matters; the core keeps the last 80k characters). Sent
- *   with a bug only while diagnostic info is on. Omit when the app has no log.
+ * @param {() => (string | null | Promise<string | null>)} [options.getLog]  The app's own log,
+ *   if it keeps a better one (its newest end matters; the core keeps the last 80k characters).
+ *   Omit it and this module keeps one for the app — see "The app's own record". Either way it
+ *   is sent with a bug only while diagnostic info is on, and Copy Log copies it.
  * @param {() => (import('electron').BrowserWindow | null | undefined)} [options.parent]  The
  *   window the feedback window should stay above, if any.
  * @returns {{ open: (source?: string) => void, menuItem: (source?: string) => object }}
@@ -145,8 +222,10 @@ function setup(options) {
   if (installed) throw new Error('desktop-feedback: setup() was already called');
   installed = true;
 
-  const hasLog = typeof options.getLog === 'function';
-  const getLog = hasLog ? options.getLog : () => null;
+  // Every app has a log now: its own, or the record kept here.
+  const hasLog = true;
+  if (typeof options.getLog !== 'function') installLogCapture(appName);
+  const getLog = typeof options.getLog === 'function' ? options.getLog : () => logLines.join('\n');
   const getParent = typeof options.parent === 'function' ? options.parent : () => null;
   let win = null;
   // One report id per opened form: a retry after a lost reply stores the same
