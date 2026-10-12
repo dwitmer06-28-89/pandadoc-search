@@ -137,6 +137,11 @@ function formatTrail(steps             )         {
     .join('\n');
 }
 
+/** A log, then the trail under its heading — the one shape a report's log and Copy log share. */
+function withTrail(body        , steps             )         {
+  return `${body}${body ? '\n\n' : ''}=== path through the app ===\n${formatTrail(steps)}`;
+}
+
 // ── A log for apps that have none of their own ────────────────────────────────
 // Driven and Dividends pass their own export; the rest install this.
 
@@ -470,7 +475,7 @@ function logWithTrail(log                           )         {
   const body = (log ?? '').trimEnd();
   const steps = getTrail();
   if (!steps.length) return body || '(no log recorded)';
-  return `${body}${body ? '\n\n' : ''}=== path through the app ===\n${formatTrail(steps)}`;
+  return withTrail(body, steps);
 }
 
 /**
@@ -482,6 +487,9 @@ function logWithTrail(log                           )         {
  */
 async function copyLogWithTrail(log                                        )                {
   const text = Promise.resolve(log).then(logWithTrail);
+  // Observed now, so a log that fails while the clipboard is refused below is not an
+  // unhandled rejection; `await text` still rethrows it to the caller.
+  text.catch(() => {});
   const clip = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
   if (!clip) throw new Error(CLIPBOARD_UNWRITABLE);
   const Item = typeof ClipboardItem === 'undefined' ? undefined : ClipboardItem;
@@ -574,8 +582,7 @@ function buildFeedbackRow(
   const withDiagnostics = isBug && diagnosticsEnabled();
   let log                = null;
   if (withDiagnostics) {
-    const body = (ctx.log ?? '').slice(-LOG_KEEP).trimEnd();
-    log = `${body}${body ? '\n\n' : ''}=== path through the app ===\n${formatTrail(steps)}`;
+    log = withTrail((ctx.log ?? '').slice(-LOG_KEEP).trimEnd(), steps);
   }
   return {
     id: ctx.id,

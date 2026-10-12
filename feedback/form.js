@@ -175,15 +175,18 @@
 
   // Copy log: the log a bug report would carry, for pasting straight to Claude.
   // Main writes the clipboard (Electron's own), so no page permission is involved.
+  const COPY_FAILED = 'The log didn’t copy: ';
   $('copy-log').addEventListener('click', async () => {
     const btn = $('copy-log');
     btn.disabled = true;
     try {
-      await bridge.copy(core.logWithTrail(await bridge.log()));
+      // Main answers false when it refused the write; only true means the clipboard has it.
+      if ((await bridge.copy(core.logWithTrail(await bridge.log()))) !== true) throw new Error('The app refused the copy.');
+      if ($('error').textContent.startsWith(COPY_FAILED)) showError('');
       btn.textContent = 'Copied';
       setTimeout(() => { btn.textContent = 'Copy Log'; btn.disabled = false; }, 1500);
     } catch (err) {
-      showError(`The log didn’t copy: ${err instanceof Error ? err.message : String(err)}`);
+      showError(COPY_FAILED + (err instanceof Error ? err.message : String(err)));
       btn.disabled = false;
     }
   });
