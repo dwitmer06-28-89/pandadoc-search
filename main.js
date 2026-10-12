@@ -59,7 +59,8 @@ let recents = [];
 // copy of ProjectGlobals/shared-code/desktop-feedback; never edit it here). A
 // report goes to the feedback inbox and lands in this app's Develop backlog.
 // No getLog: the app keeps no log of its own (dark-mode.log is an opt-in
-// debug file), so a report carries the path through the form only. The form
+// debug file), so a report carries the path through the form only and the
+// form's Copy Log button stays hidden. The form
 // stays above the PandaDoc window when one is open.
 const feedback = require('./feedback/main.js').setup({
   app: 'Pandadoc Search',
@@ -1478,6 +1479,8 @@ function startDevReload() {
       ],
       classify: (rel) => {
         if (rel.endsWith('.html')) return 'reload';
+        // feedback/form.css is the one stylesheet not inline in its .html.
+        if (rel.endsWith('.css')) return 'reload';
         if (rel.startsWith('assets')) return 'reload';
         if (rel.endsWith('preload.js')) return 'reload';
         if (rel.endsWith('.js')) return 'relaunch';
