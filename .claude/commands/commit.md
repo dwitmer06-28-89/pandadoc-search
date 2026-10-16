@@ -13,6 +13,8 @@ Commit **only** the files you have edited or written during this conversation �
 
    If the user passed an explicit list of files as arguments to `/commit`, use those instead.
 
+   **A pasted earlier session extends this list.** When the user pasted another session's transcript or summary into this conversation to pick up from (one account ran out of credits), you are that session's continuation: add every file it says it created or modified, and the uncommitted changes it disowned as "already modified when this session started" or "not mine to commit" — that session cannot be returned to, so nobody else will commit them. Leave out only a file you can tie to a different, live session, and name it in the report. Step 2's filter still applies to every added path.
+
 2. **Verify and filter.** For each path, check that the file still exists and that `git status --porcelain -- <path>` shows it as modified, added, or untracked. Drop any path that is clean or no longer exists — a clean path is already committed (by this session or another one, it makes no difference) and needs nothing from you.
 
    If the resulting list is empty, do **not** create an empty commit — and do **not** explain the emptiness. The question the user is asking is "are my edits committed?", not "did *you* commit them". Every session file being clean is a yes: skip to the push step (an earlier commit may still be sitting unpushed), then report per **Reporting**. The only exception is a path that is clean because the file is *gone* or the edit was reverted — that is a genuine "could not be committed" case and belongs in the report.
