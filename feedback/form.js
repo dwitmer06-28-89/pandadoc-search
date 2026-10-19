@@ -34,8 +34,6 @@
     const bug = draft.kind === 'bug';
     $('summary-label').textContent = bug ? 'What happened' : 'Your request';
     $('detail-label').textContent = bug ? 'What did you expect to happen' : 'How does the app handle this today?';
-    $('detail-optional').hidden = bug;
-    $('detail').required = bug;
     $('diag').hidden = !bug || !ctx || !ctx.hasLog;
     send.disabled = sending || !ctx || core.draftProblem(draft) !== null;
     const n = draft.screenshots.length;

@@ -47,6 +47,8 @@
  * what was typed. `buildFeedbackRow` files them under the type that is sent.
  */
 
+                                                                                                
+
 function emptyDraft(kind               = 'bug')                {
   return { kind, flag: null, summary: '', detail: '', screenshots: [], feature: null };
 }
@@ -325,6 +327,85 @@ function onOpenFeedback(handler                          )             {
   return () => window.removeEventListener(OPEN_EVENT, listener);
 }
 
+// ── Shake to open (phone and iPad) ────────────────────────────────────────────
+//
+// A HARD shake only (Deron, 2026-10-19). Driven once used iOS's own shake gesture,
+// which fired on ordinary handling and was removed; this asks for several violent
+// back-and-forth swings in under a second, which pocketing, walking, a bump or a
+// dropped phone do not make.
+
+/** Acceleration (gravity removed, m/s²) a swing must reach to count — about 2.4 g. */
+const SHAKE_PEAK = 24;
+/** Swings, each the opposite way to the last, that make a shake. */
+const SHAKE_SWINGS = 4;
+/** All of them inside this window. */
+const SHAKE_WINDOW_MS = 1000;
+/** After a shake, ignore motion this long. */
+const SHAKE_COOLDOWN_MS = 3000;
+
+/** Pure detector: feed it samples, it answers true on the sample that completes a hard shake. */
+function hardShakeDetector()                               {
+  let swings                 = [];
+  let quietUntil = -Infinity;
+  return (s) => {
+    if (s.t < quietUntil) return false;
+    swings = swings.filter((p) => s.t - p.t <= SHAKE_WINDOW_MS);
+    if (Math.hypot(s.x, s.y, s.z) < SHAKE_PEAK) return false;
+    const last = swings[swings.length - 1];
+    // One swing spans several samples; count it again only once the direction flips.
+    if (last && last.x * s.x + last.y * s.y + last.z * s.z >= 0) return false;
+    swings.push(s);
+    if (swings.length < SHAKE_SWINGS) return false;
+    swings = [];
+    quietUntil = s.t + SHAKE_COOLDOWN_MS;
+    return true;
+  };
+}
+
+let shakeInstalled = false;
+
+/**
+ * Once at the app shell, beside `installTrail()`: a hard shake opens the form
+ * (`openFeedback('shake')`), or runs `onShake` when given. Only inside the
+ * Capacitor app — never a desktop or a mobile browser, where asking for motion
+ * would prompt. iOS hands motion to a page only after `requestPermission()`
+ * inside a tap; Capacitor grants it without a prompt, so the first tap asks.
+ */
+function installHardShake(onShake             = () => openFeedback('shake'))       {
+  if (shakeInstalled || typeof window === 'undefined') return;
+  const cap = (window                                                                   ).Capacitor;
+  if (!cap?.isNativePlatform?.() || typeof DeviceMotionEvent === 'undefined') return;
+  shakeInstalled = true;
+  const detect = hardShakeDetector();
+  const onMotion = (e                   ) => {
+    const a = e.acceleration;
+    if (!a || a.x === null || a.y === null || a.z === null) return;
+    if (document.visibilityState !== 'visible') return;
+    if (detect({ x: a.x, y: a.y, z: a.z, t: e.timeStamp })) onShake();
+  };
+  const listen = () => window.addEventListener('devicemotion', onMotion);
+  const ask = (DeviceMotionEvent                                                            ).requestPermission;
+  if (typeof ask !== 'function') {
+    listen();
+    return;
+  }
+  // Ask until iOS answers; a refusal to ASK (no gesture it counts) tries again next tap.
+  let asking = false;
+  const onTap = () => {
+    if (asking) return;
+    asking = true;
+    ask.call(DeviceMotionEvent).then((state) => {
+      document.removeEventListener('touchend', onTap, true);
+      document.removeEventListener('click', onTap, true);
+      if (state === 'granted') listen();
+    }, () => {
+      asking = false;
+    });
+  };
+  document.addEventListener('touchend', onTap, true);
+  document.addEventListener('click', onTap, true);
+}
+
 // ── The screenshot ────────────────────────────────────────────────────────────
 
 const SHOT_MAX_EDGE = 1280;
@@ -521,7 +602,6 @@ function dataUrlBytes(dataUrl        )                    {
 function draftProblem(d               )                {
   if (d.kind === 'bug') {
     if (!d.summary.trim()) return 'Say what happened.';
-    if (!d.detail.trim()) return 'Say what you expected to happen.';
   } else if (!d.summary.trim()) {
     return 'Describe your request.';
   }
@@ -621,7 +701,8 @@ function reportBody(r             , screenshotRefs                   )         {
     '',
   ];
   if (r.kind === 'bug') {
-    out.push('**What happened**', '', r.happened, '', '**What they expected to happen**', '', r.expected, '');
+    out.push('**What happened**', '', r.happened, '');
+    if (r.expected) out.push('**What they expected to happen**', '', r.expected, '');
   } else {
     out.push('**Request**', '', r.request, '');
     if (r.currentHandling) out.push('**How the app handles it today**', '', r.currentHandling, '');
@@ -640,5 +721,5 @@ function reportBody(r             , screenshotRefs                   )         {
   return out.join('\n');
 }
 
-window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SHAKE_PEAK, SHAKE_SWINGS, SHAKE_WINDOW_MS, SHAKE_COOLDOWN_MS, hardShakeDetector, installHardShake, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
 })();
