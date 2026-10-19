@@ -334,8 +334,8 @@ function onOpenFeedback(handler                          )             {
 // back-and-forth swings in under a second, which pocketing, walking, a bump or a
 // dropped phone do not make.
 
-/** Acceleration (gravity removed, m/s²) a swing must reach to count — about 2.4 g. */
-const SHAKE_PEAK = 24;
+/** Acceleration (gravity removed, m/s²) a swing must reach to count — about 2 g. */
+const SHAKE_PEAK = 20;
 /** Swings, each the opposite way to the last, that make a shake. */
 const SHAKE_SWINGS = 4;
 /** All of them inside this window. */
@@ -362,48 +362,62 @@ function hardShakeDetector()                               {
   };
 }
 
+/** The weakest sample the phone forwards at all (m/s²) — strong enough to be worth a look. */
+const SHAKE_FLOOR = 14;
+
 let shakeInstalled = false;
 
 /**
  * Once at the app shell, beside `installTrail()`: a hard shake opens the form
  * (`openFeedback('shake')`), or runs `onShake` when given. Only inside the
- * Capacitor app — never a desktop or a mobile browser, where asking for motion
- * would prompt. iOS hands motion to a page only after `requestPermission()`
- * inside a tap; Capacitor grants it without a prompt, so the first tap asks.
+ * Capacitor app, where the native `HardShake` plugin (shared-code/ios/) reads
+ * CoreMotion — no permission prompt and no tap needed, which the web's
+ * DeviceMotionEvent cannot offer. Elsewhere it does nothing.
  */
 function installHardShake(onShake             = () => openFeedback('shake'))       {
   if (shakeInstalled || typeof window === 'undefined') return;
-  const cap = (window                                                                   ).Capacitor;
-  if (!cap?.isNativePlatform?.() || typeof DeviceMotionEvent === 'undefined') return;
-  shakeInstalled = true;
-  const detect = hardShakeDetector();
-  const onMotion = (e                   ) => {
-    const a = e.acceleration;
-    if (!a || a.x === null || a.y === null || a.z === null) return;
-    if (document.visibilityState !== 'visible') return;
-    if (detect({ x: a.x, y: a.y, z: a.z, t: e.timeStamp })) onShake();
-  };
-  const listen = () => window.addEventListener('devicemotion', onMotion);
-  const ask = (DeviceMotionEvent                                                            ).requestPermission;
-  if (typeof ask !== 'function') {
-    listen();
+  const cap = (window
+
+   ).Capacitor;
+  if (!cap?.isNativePlatform?.()) return;
+  if (!cap.registerPlugin) {
+    // Called at module scope ahead of @capacitor/core's own evaluation: try once more after it.
+    setTimeout(() => {
+      if (cap.registerPlugin) installHardShake(onShake);
+    }, 0);
     return;
   }
-  // Ask until iOS answers; a refusal to ASK (no gesture it counts) tries again next tap.
-  let asking = false;
-  const onTap = () => {
-    if (asking) return;
-    asking = true;
-    ask.call(DeviceMotionEvent).then((state) => {
-      document.removeEventListener('touchend', onTap, true);
-      document.removeEventListener('click', onTap, true);
-      if (state === 'granted') listen();
-    }, () => {
-      asking = false;
-    });
-  };
-  document.addEventListener('touchend', onTap, true);
-  document.addEventListener('click', onTap, true);
+  shakeInstalled = true;
+  const native = cap.registerPlugin('HardShake')                   ;
+  const detect = hardShakeDetector();
+  // A strong burst that fell short is logged once, so a bug report's log says how
+  // hard the shake was if one ever fails to open the form.
+  let burstPeak = 0;
+  let burstFired = false;
+  let burstEnd                                           ;
+  native
+    .addListener('motion', (s) => {
+      burstPeak = Math.max(burstPeak, Math.hypot(s.x, s.y, s.z));
+      if (detect(s)) {
+        burstFired = true;
+        onShake();
+      }
+      clearTimeout(burstEnd);
+      burstEnd = setTimeout(() => {
+        if (!burstFired) {
+          console.warn(`[feedback] strong motion, no shake: peak ${burstPeak.toFixed(1)} m/s² (a shake is ${SHAKE_SWINGS} swings over ${SHAKE_PEAK})`);
+        }
+        burstPeak = 0;
+        burstFired = false;
+      }, 600);
+    })
+    .then(() => native.start({ floor: SHAKE_FLOOR }))
+    .then(
+      (r) => {
+        if (!r.available) console.warn('[feedback] shake: this device has no motion sensor');
+      },
+      (e         ) => console.warn('[feedback] shake unavailable (native HardShake plugin missing?):', e),
+    );
 }
 
 // ── The screenshot ────────────────────────────────────────────────────────────
@@ -721,5 +735,5 @@ function reportBody(r             , screenshotRefs                   )         {
   return out.join('\n');
 }
 
-window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SHAKE_PEAK, SHAKE_SWINGS, SHAKE_WINDOW_MS, SHAKE_COOLDOWN_MS, hardShakeDetector, installHardShake, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SHAKE_PEAK, SHAKE_SWINGS, SHAKE_WINDOW_MS, SHAKE_COOLDOWN_MS, hardShakeDetector, SHAKE_FLOOR, installHardShake, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
 })();
