@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "lanes": ["design", "diagnose", "develop", "validation", "review", "deploy"],
+  "handwork": {
+    "validation": "/test-dev desktop runs PandaDoc Search from the working tree with live reload (npm run dev — quit the installed copy first); /test-prod desktop when a change needs checking bundled with DevTools, /test-release desktop to see it exactly as it ships.",
+    "deploy": "/deploy-desktop bumps the version, signs, notarizes and publishes the Mac app to this repo's GitHub Releases (npm run release); installed copies auto-update, and the pushed v* tag builds the Windows installer in GitHub Actions."
+  },
+  "deployCommand": "/deploy-desktop",
+  "environments": [
+    {
+      "id": "mac",
+      "label": "Mac",
+      "install": "/test-dev desktop"
+    }
+  ]
+}

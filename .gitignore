@@ -9,3 +9,10 @@ out/
 .env.*
 *.p12
 *.mobileprovision
+
+# Develop runtime state: everything under .develop/ is what a checkout produced while
+# running (tickets, thread logs, transcripts, staged skills), never source. A whitelist,
+# not a list of subdirectories, so a new engine directory is covered the day it appears.
+# project.json is the one exception: its absence is the definition of "uninitialized".
+.develop/*
+!.develop/project.json
