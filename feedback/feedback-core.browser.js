@@ -257,6 +257,57 @@ function isFeedbackOwner(email                           )          {
 
 /** The feedback inbox (`ProjectGlobals/feedback-inbox/`); `desktop-feedback/inbox.json` names the same one. */
 const FEEDBACK_INBOX_URL = 'https://feedback-inbox.drivendev.workers.dev';
+
+// ── Sending a report ──────────────────────────────────────────────────────────
+// Since 2026-11-11 every app posts its report straight to the feedback inbox, and the
+// track-work board on Deron's Mac (ProjectGlobals/board/feedback.mjs) drains it into that
+// app's board as a Backlog item tagged with the sender, screenshots and log kept. The
+// Dexie Cloud `feedback` table is no longer written: only Develop's collector read it.
+
+/**
+ * The inbox's APP key — not a secret: it only lets a report in, it ships inside every
+ * app already, and `desktop-feedback/inbox.json` holds the same value. Reading,
+ * deleting or publishing features takes the admin key, which never leaves the Mac.
+ */
+const FEEDBACK_APP_KEY = '8e1d89bf7c982178559b4cdd9e261462e5825ee186972c11';
+const SEND_TIMEOUT_MS = 30_000;
+/** What the inbox accepts (`feedback-inbox/src/validate.js`): the row's own fields, nothing a database added. */
+const SEND_KEYS = [
+  'id', 'createdAt', 'app', 'kind', 'flag', 'title', 'happened', 'expected', 'request', 'currentHandling',
+  'screenshot', 'trail', 'log', 'diagnosticsIncluded', 'senderName', 'senderEmail', 'platform', 'userAgent',
+]         ;
+const FEEDBACK_OFFLINE = "Couldn't reach the feedback service. Check your internet connection";
+
+/**
+ * Post `row` (from `buildFeedbackRow`) to the feedback inbox. Resolves once the inbox has
+ * it; throws an Error with a sentence the form can show otherwise. Sending the same row
+ * twice is one report — the inbox keys it by `row.id`.
+ */
+async function sendFeedbackRow(row             )                {
+  const body                          = {};
+  for (const k of SEND_KEYS) body[k] = row[k];
+  if (row.feature) body.feature = row.feature;
+  let res          ;
+  try {
+    res = await fetch(`${FEEDBACK_INBOX_URL}/reports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Feedback-Key': FEEDBACK_APP_KEY },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error(FEEDBACK_OFFLINE);
+  }
+  if (res.ok) return;
+  let detail = '';
+  try {
+    detail = String(((await res.json())                       ).error ?? '');
+  } catch {
+    /* not JSON */
+  }
+  if (res.status === 413) throw new Error('The report is too large to send. Try fewer or smaller screenshots');
+  throw new Error(`The feedback service refused the report (${res.status}${detail ? `: ${detail}` : ''})`);
+}
 const FEATURE_LABEL = 'Feature';
 const NO_FEATURE_LABEL = 'No feature';
 const FEATURES_KEY = 'feedback.features.';
@@ -735,5 +786,5 @@ function reportBody(r             , screenshotRefs                   )         {
   return out.join('\n');
 }
 
-window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SHAKE_PEAK, SHAKE_SWINGS, SHAKE_WINDOW_MS, SHAKE_COOLDOWN_MS, hardShakeDetector, SHAKE_FLOOR, installHardShake, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
+window.FeedbackCore = Object.freeze({ emptyDraft, recordScreen, recordOpen, getTrail, installTrail, formatTrail, installLogCapture, exportCapturedLog, diagnosticsEnabled, setDiagnosticsEnabled, diagnosticsNoticeSeen, markDiagnosticsNoticeSeen, subscribeFeedbackPrefs, DIAGNOSTICS_SETTING_LABEL, DIAGNOSTICS_SETTING_HINT, DIAGNOSTICS_NOTICE, SENDER_NOTICE, FEEDBACK_OWNER_EMAILS, isFeedbackOwner, FEEDBACK_INBOX_URL, FEEDBACK_OFFLINE, sendFeedbackRow, FEATURE_LABEL, NO_FEATURE_LABEL, cleanFeedbackFeatures, fetchFeedbackFeatures, pickedFeature, openFeedback, onOpenFeedback, SHAKE_PEAK, SHAKE_SWINGS, SHAKE_WINDOW_MS, SHAKE_COOLDOWN_MS, hardShakeDetector, SHAKE_FLOOR, installHardShake, SCREENSHOTS_MAX, TOO_MANY_SCREENSHOTS, screenshotOverflow, withScreenshot, withoutScreenshot, screenshotsOf, screenshotFromFile, NO_CLIPBOARD_IMAGE, screenshotsFromFiles, screenshotsFromClipboard, imageFromPaste, onPastedImage, COPY_LOG_LABEL, LOG_COPIED, logWithTrail, copyLogWithTrail, dataUrlBytes, draftProblem, titleFor, SYNC_PIECE, toPieces, joinPieces, buildFeedbackRow, reportBody });
 })();
