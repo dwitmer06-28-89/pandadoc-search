@@ -1,5 +1,9 @@
 # PandaDoc Search engineering rules
 
+This project is worked by the Develop agent team. An agent loads its own instructions with
+`node ~/Documents/Code/TrackWork/board.mjs agent load <agent id> --project Pandadoc Search`; this file holds only what is
+true of the code itself. Procedures live in `~/Documents/Code/TrackWork/projects/Pandadoc Search/` (project.md, how-to/).
+
 A macOS (and Windows) menu-bar Electron app: a global hotkey (`Control+Shift+P`, set in
 `config.js`) pops a search pill, and results open in an in-app PandaDoc window with a floating
 overlay and a Claude panel that assesses the contract on screen (`assess.js`, the Claude Agent
@@ -29,10 +33,9 @@ This project's engineering rules live in two places, and neither of them is here
 
 The index was moved out of this file on 2026-08-21. This file is **auto-loaded into every
 agent on every turn**, the index was 50-64% of it, and most of the agents paying that cost
-have no use for it — the quality gate, the app drive and the validation-steps agent never touch
-a rule (`ProjectGlobals/.claude/rules-protocol.md` §3). Three phases read the index, and each
-names it by path: **`/design` step 1**, **`/implement` step 2** — scoped to the areas it edits,
-to CHECK the ticket's quoted rules, never to re-decide them — and **`/code-review` step 1**.
+have no use for it. The **Architect** (quotes the binding rules into the ticket) and **Review**
+(checks the diff) agents open it; Product Owner opens one rule at a time when changing it. Code,
+Test, Deploy and Dispatch work from the rules the ticket quotes.
 
 **Judging a change against the rules without opening `.claude/RULES-INDEX.md` is a fault,
 not a shortcut.** A pointed-at index can be skipped in a way an auto-loaded one cannot; that
@@ -48,15 +51,6 @@ saying "check the rules".
   option. Say in one line which you chose; surface the alternative only when the tradeoff is
   genuinely decision-worthy.
 - **Describe a visual change relative to the running app**, not to a mockup.
-- **Before reporting a request done, check that the instance the user would test it in is
-  actually healthy — and fix it if it isn't.** "Done" means done *and testable*. A hung or
-  orphaned half is the normal failure: the supervising process dies and leaves a dev server or
-  a shell behind, so the window is still on screen serving nothing. Restart it yourself and say
-  what you found. Kill only this project's processes — another app's dev server may be running
-  on this Mac.
-- **Say "ready to test" only once the lane the user will actually look at is serving the
-  change — and say WHICH lane.** A stale install or a dead dev server means the user tests old
-  code, and nothing on screen says so.
 
 - **"Liquid glass" ALWAYS means the native UIKit material, and a CSS imitation of it is a
   REJECTED solution — never offer it as an option, never ship it as an interim step, and never
@@ -68,10 +62,8 @@ saying "check the rules".
 
 ## Committing
 
-- `/commit` stages at **file granularity** (`git add -- <file>`) and commits only files edited
-  this session. When a session-edited file also carries unrelated pre-existing hunks, commit the
-  whole file — that's intended, don't ask which hunks. **Never `git add -A` / `git add .`** —
-  that sweeps every unreviewed file in the tree into the commit.
+- Stage only your own files, by path. **Never `git add -A` / `git add .`** — that sweeps every
+  unreviewed file in the tree into the commit. Every commit is pushed.
 - **A commit that imports a new module must include that module.** A brand-new file is
   untracked, so it is silently left behind and `main` stops building while the working tree it
   came from still works — no error locally, and the author is the one person who can't
@@ -79,8 +71,8 @@ saying "check the rules".
   commit.
 - **`git push` of a branch needs no permission** — nothing builds or deploys from a branch push.
   **A pushed `v*` tag is a deploy act**: `.github/workflows/` builds the Windows installer on it
-  and uploads it to the GitHub Release. The gated act is `/deploy-desktop` (`npm run release`,
-  which signs, notarizes and publishes to the public update feed); never push a `v*` tag outside it.
+  and uploads it to the GitHub Release. A release is `npm run release`, which signs, notarizes and
+  publishes to the public update feed; never push a `v*` tag outside it.
 
 ## High-blast-radius files
 
