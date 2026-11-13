@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "installedAt": "2026-09-20T18:22:59.173Z",
+  "app": "0.2.0",
+  "skills": [],
+  "_note": "Shared skills are symlinks to ProjectGlobals/.claude/skills since 2026-10-12; no sha list is kept for them."
+}
