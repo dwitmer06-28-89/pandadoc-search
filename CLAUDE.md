@@ -1,7 +1,7 @@
 # PandaDoc Search engineering rules
 
 This project is worked by the Develop agent team. An agent loads its own instructions with
-`node ~/Documents/Code/TrackWork/board.mjs agent load <agent id> --project Pandadoc Search`; this file holds only what is
+`node ~/Documents/Code/TrackWork/board.mjs agent load <agent id> --project "Pandadoc Search"`; this file holds only what is
 true of the code itself. Procedures live in `~/Documents/Code/TrackWork/projects/Pandadoc Search/` (project.md, how-to/).
 
 A macOS (and Windows) menu-bar Electron app: a global hotkey (`Control+Shift+P`, set in
